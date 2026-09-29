@@ -191,6 +191,18 @@ details.settings summary{cursor:pointer}
   .wrap{padding:0 11px}
   h2{font-size:14px}
   .tl-name{width:92px; min-width:92px}
+  /* ...unless you ask for everything back, which scrolls sideways by choice */
+  body.cols-all .c-as, body.cols-all .c-rl, body.cols-all .c-lastHit, body.cols-all .c-status, body.cols-all .c-rg,
+  body.cols-all .h-lvl, body.cols-all .h-as, body.cols-all .h-rl, body.cols-all .h-ff, body.cols-all .h-ag,
+  body.cols-all .a-other, body.cols-all .w-morph, body.cols-all .w-blood, body.cols-all .w-other,
+  body.cols-all .w-pts, body.cols-all .w-refill{display:table-cell !important}
+  body.cols-all #mdtbl th, body.cols-all #mdtbl td,
+  body.cols-all #qtbl th, body.cols-all #qtbl td,
+  body.cols-all #mtbl th, body.cols-all #mtbl td,
+  body.cols-all #wartbl th, body.cols-all #wartbl td{display:table-cell !important}
+  body.cols-all .mobonly:not(#colsBtn){display:none}
+  body.cols-all td.name{max-width:none}
+  body.cols-all th{white-space:nowrap}
   /* Phones: let tables fit the screen instead of scrolling sideways. Minimum
      widths come off, spacing tightens, and the columns that answer the least
      are dropped — the data is all still there on a wider screen. */
@@ -198,7 +210,7 @@ details.settings summary{cursor:pointer}
   table{font-size:14.5px}
   th,td{padding:5px 5px}
   /* headers wrap instead of forcing the table wider than the screen */
-  th{font-size:11px; letter-spacing:.02em; white-space:normal; word-break:break-word; line-height:1.15}
+  th{font-size:11px; letter-spacing:.02em; white-space:normal; word-break:normal; overflow-wrap:normal; line-height:1.15}
   td{white-space:nowrap}
   td.name{font-size:14.5px}
   .tblwrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
@@ -252,6 +264,7 @@ details.settings summary{cursor:pointer}
       <h1>War <span>Ledger</span></h1>
       <div class="vsline" id="vsline" hidden></div>
       <button id="switchWar" hidden>⟵ Dashboard</button>
+      <button id="colsBtn" class="mobonly" title="Show every column (scrolls sideways)">⤢ All columns</button>
       <div class="meta" style="margin-left:auto"><span class="statusdot" id="dot"></span><span id="pollmeta">not connected</span></div>
     </div>
   </div>
@@ -371,6 +384,26 @@ details.settings summary{cursor:pointer}
     <input type="range" id="scrub" min="0" max="1000" value="1000" aria-label="Scrub through the war timeline">
   </div>
   <div class="scrub-labels"><span id="axL"></span><span id="axM"></span><span id="axR"></span></div>
+  <div class="termsbar" id="termsBar">
+    <div id="termsEdit" class="row" style="gap:8px">
+      <span class="lbl">Terms</span>
+      <button id="termsFromMarker" class="primary">Set from marker · <span id="termsMarkerLbl">–</span></button>
+      <button id="termsSuggest">Suggest</button>
+      <button id="termsFromStart">From start</button>
+      <button id="termsNow">Now</button>
+      <span class="gap"></span>
+      <input type="datetime-local" id="termsInput" title="or type an exact time">
+      <button id="termsSet">Set</button>
+    </div>
+    <div id="termsSetView" class="row" style="gap:8px" hidden>
+      <span class="lbl">Terms</span>
+      <b id="termsWhen" style="color:var(--amber)">–</b>
+      <span class="meta" id="termsScope">— the ledger splits before / after this</span>
+      <span class="gap"></span>
+      <button id="termsEditBtn">Change</button>
+      <button id="termsClear" class="ghost">clear</button>
+    </div>
+  </div>
   <div class="zoomrow" id="zoomRow">
     <span class="lbl">Zoom</span>
     <button data-zoom="0">Whole war</button>
@@ -383,26 +416,8 @@ details.settings summary{cursor:pointer}
     <button id="panL" title="Move the window earlier">◀</button>
     <button id="panR" title="Move the window later">▶</button>
   </div>
-  <div class="termsbar" id="termsBar">
-    <div id="termsEdit" class="row" style="gap:8px">
-      <span class="lbl">Terms</span>
-      <input type="datetime-local" id="termsInput">
-      <button id="termsSet" class="primary">Set</button>
-      <button id="termsNow">Now</button>
-      <button id="termsFromStart">From start</button>
-      <button id="termsSuggest">Suggest</button>
-    </div>
-    <div id="termsSetView" class="row" style="gap:8px" hidden>
-      <span class="lbl">Terms</span>
-      <b id="termsWhen" style="color:var(--amber)">–</b>
-      <span class="meta" id="termsScope">— the ledger splits before / after this</span>
-      <span class="gap"></span>
-      <button id="termsEditBtn">Change</button>
-      <button id="termsClear" class="ghost">clear</button>
-    </div>
-  </div>
   <p class="hint" id="termsHint" hidden></p>
-  <p class="hint">Bars above the line: your hits landed (respect gained). Below: hits taken (respect lost). Drag the marker to replay the war — the table and turtle board follow it. Zoom narrows the window both this chart and the turtle board draw, so you can see individual hits; the arrows move that window through the war.</p>
+  <p class="hint">Pinch the chart to zoom (or ⌘/Ctrl + scroll); drag the marker to replay. Bars above the line: your hits landed (respect gained). Below: hits taken (respect lost). Drag the marker to replay the war — the table and turtle board follow it. Zoom narrows the window both this chart and the turtle board draw, so you can see individual hits; the arrows move that window through the war.</p>
 </section>
 
 <!-- TABLE -->
@@ -515,6 +530,47 @@ details.settings summary{cursor:pointer}
   <p class="hint" id="armHint"></p>
 </section>
 
+<!-- WAR PAYOUT -->
+<section id="payCard" class="card" hidden>
+  <div class="scrubhead">
+    <h2 style="margin:0">War payout</h2>
+    <div class="meta" id="payMeta"></div>
+  </div>
+  <div class="zoomrow">
+    <span class="lbl">Pay</span>
+    <select id="payMode" style="padding:4px 8px">
+      <option value="rate">a set rate per hit</option>
+      <option value="pot">by splitting a pot</option>
+    </select>
+    <span class="gap"></span>
+    <span class="lbl" id="payPotLbl" hidden>Pot $</span>
+    <input id="payPot" type="text" inputmode="numeric" style="width:130px" hidden>
+  </div>
+  <div class="zoomrow">
+    <span class="lbl" id="payL1">Pre-terms hit $</span>
+    <input id="payPre" type="text" inputmode="numeric" style="width:110px">
+    <span class="lbl" id="payL2">Post-terms hit $</span>
+    <input id="payPost" type="text" inputmode="numeric" style="width:110px">
+    <span class="lbl" id="payL3">Assist $</span>
+    <input id="payAssist" type="text" inputmode="numeric" style="width:110px">
+    <span class="gap"></span>
+    <label class="inl"><input type="checkbox" id="payLink" style="width:auto"> post-terms hits pay the assist rate</label>
+  </div>
+  <div class="tblwrap" style="margin-top:10px">
+    <table id="paytbl" style="min-width:620px">
+      <thead><tr><th style="text-align:left">Member</th><th>Hits pre</th><th>Hits post</th><th>Assists</th><th>Share</th><th>Payout</th></tr></thead>
+      <tbody id="paytblBody"></tbody>
+      <tfoot><tr id="paytblFoot"></tr></tfoot>
+    </table>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button id="payCopy">Copy list</button>
+    <button id="payCsv">Export CSV</button>
+    <span class="meta" id="payCopied"></span>
+  </div>
+  <p class="hint" id="payHint"></p>
+</section>
+
 <!-- HIT QUALITY -->
 <section id="qualityCard" class="card" hidden>
   <h2>Hit quality — who's punching down</h2>
@@ -556,7 +612,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-09-20 21:16</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-09-29 21:58</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="mback" class="modal-back">
@@ -861,7 +917,7 @@ async function pollScore(){
 /* ---------- polling loops ---------- */
 function startTracking(){
   $("warpick").hidden = true; $("homeCard").hidden = true; $("homeArmCard").hidden = true;
-  for(const id of ["scrubCard","tableCard","tlCard","medCard","armCard","qualityCard"]) $(id).hidden=false;
+  for(const id of ["scrubCard","tableCard","tlCard","medCard","armCard","payCard","qualityCard"]) $(id).hidden=false;
   const es = load(LS.esnap(war.warId)); if(es){ enemyDir=es.dir||{}; enemyStatus=es.status||{} }
   medEvents = load(LS.med(war.warId))||[];
   armoury = load(LS.arm(war.warId))||[]; armIds = new Set(armoury.map(a=>a.nid).filter(Boolean));
@@ -873,12 +929,14 @@ function startTracking(){
   $("pAtk").value=cfg.pAtk; $("pMem").value=cfg.pMem;
   $("syncUrl").value=cfg.syncUrl||""; $("syncTok").value=cfg.syncTok||"";
   if(cfg.tlTall){ $("tlRows").classList.add("tl-tall"); $("tlTall").className="on" }
+  if(cfg.colsAll){ document.body.classList.add("cols-all"); $("colsBtn").textContent="⤢ Fewer columns" }
   $("syncTest").checked = !!cfg.syncTest;
   $("syncByFac").checked = !!cfg.syncByFac;
   if(cfg.syncUrl){ fetchServerSnaps().then(c=>{ if(c) renderAll() }); fetchTerms().then(c=>{ if(c) renderAll() }) }
   renderTerms();
   liveMode = true; scrubT = clampT(now());
   renderAll();              // draw cached data at once: a failing first poll
+  bindCharts();
   window.scrollTo(0,0);     // entering a war is a page change, not a jump within one
   schedule(); tick(true);   // used to leave the whole war page blank
 }
@@ -909,7 +967,7 @@ function updDot(){
 /* ---------- aggregation ---------- */
 function aggregate(T){
   const rows = {}; // id -> stats
-  const get = id => rows[id] || (rows[id]={id, of1:0,of2:0, rg1:0,rg2:0, ag1:0,ag2:0, rl1:0,rl2:0, as:0, lastHit:0});
+  const get = id => rows[id] || (rows[id]={id, of1:0,of2:0, rg1:0,rg2:0, ag1:0,ag2:0, rl1:0,rl2:0, as:0, as1:0,as2:0, lastHit:0});
   const terms = war.terms;
   for(const a of attacks){
     if(a.t>T) break;
@@ -918,7 +976,7 @@ function aggregate(T){
     if(a.aFac==war.facId && a.aId){          // outgoing
       const r=get(a.aId);
       if(WIN.has(a.res)){ post? r.of2++ : r.of1++; }
-      if(a.res==="Assist") r.as++;
+      if(a.res==="Assist"){ r.as++; post? r.as2++ : r.as1++ }
       post? r.rg2+=a.rg : r.rg1+=a.rg;
       r.lastHit=Math.max(r.lastHit,a.t);
     }
@@ -1084,7 +1142,14 @@ $("termsSet").onclick=()=>{
   if(!v){ $("termsHint").hidden=false; $("termsHint").textContent="Pick a date and time first, or use Now / From start / Suggest."; return }
   applyTerms(Math.floor(new Date(v+"Z").getTime()/1000), "");
 };
-$("termsEditBtn").onclick=()=>{ $("termsEdit").hidden=false; $("termsSetView").hidden=true };
+$("termsEditBtn").onclick=()=>{ $("termsEdit").hidden=false; $("termsSetView").hidden=true; renderScrubOnly() };
+$("termsFromMarker").onclick=()=>{ applyTerms(scrubT, "") };
+$("colsBtn").onclick=()=>{
+  const on=document.body.classList.toggle("cols-all");
+  $("colsBtn").textContent = on? "⤢ Fewer columns" : "⤢ All columns";
+  $("colsBtn").className = "mobonly"+(on?" on":"");
+  cfg.colsAll=on; save(LS.cfg,cfg);
+};
 $("resumeWar").onclick=()=>{
   if(!war) return;
   attacks=load(LS.atk(war.warId))||[]; attackIds=new Set(attacks.map(a=>a.id));
@@ -1110,7 +1175,7 @@ const COLS=[
   ["net","Net",r=>r.net],
   ["lastHit","Last hit",r=>r.lastHit],
 ];
-function renderAll(){ renderHeader(); renderScrubOnly(); renderTable(); renderTimelines(); renderMedLog(); renderArmoury(); renderQuality(); }
+function renderAll(){ renderHeader(); renderScrubOnly(); renderTable(); renderTimelines(); renderMedLog(); renderArmoury(); renderPay(); renderQuality(); }
 
 function renderQuality(){
   const per={};
@@ -1217,6 +1282,7 @@ function renderScrubOnly(){
   $("axL").textContent=fmtDT(t0); $("axM").textContent=fmtDT(t0+(t1-t0)/2); $("axR").textContent= (liveMode&&!(war.end&&war.end<=now()))? "now" : fmtDT(t1);
   drawSpark(t0,t1);
   syncZoomButtons();
+  const ml=$("termsMarkerLbl"); if(ml) ml.textContent = fmtDT(scrubT)+" TCT";
 }
 function drawSpark(t0,t1){
   const svg=$("spark"); const W=1000,H=96,mid=H*0.55; svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
@@ -1368,9 +1434,9 @@ function renderTimelines(){
     html+=`<div class="tl-row"><div class="tl-name">${esc(nm)}</div><div class="tl-band">${bars}</div></div>`;
   }
   el.innerHTML=html;
-  $("tlHint").textContent = hasSnaps
+  $("tlHint").textContent = "Pinch to zoom, drag to move through the war. " + (hasSnaps
     ? `Recording since ${fmtDT(snaps[0].t)} TCT. Bands are live status samples (every ${cfg.pMem}s while open); ticks are hits made (top, green) and taken (bottom, red).`
-    : `No live status was recorded for this period, so this is rebuilt from the attack log: ticks are hits made (top, green) and taken (bottom, red); faded red bands estimate hospital stays after being hospitalised. Self-hosps and flights can't be recovered for past wars — a quiet band with no red ticks pre-terms is your turtle.`;
+    : `No live status was recorded for this period, so this is rebuilt from the attack log: ticks are hits made (top, green) and taken (bottom, red); faded red bands estimate hospital stays after being hospitalised. Self-hosps and flights can't be recovered for past wars — a quiet band with no red ticks pre-terms is your turtle.`);
 }
 
 /* ---------- med-out farming from the hit log ----------
@@ -1881,6 +1947,158 @@ $("haHead").addEventListener("click",e=>{
 $("homeArmLoad").onclick=loadHomeArm;
 $("homeArmDays").onchange=()=>{ if(homeArm) loadHomeArm() };
 
+
+/* ---------- pinch and drag on the charts ----------
+   Two fingers narrow or widen the window around the midpoint between them; one
+   finger drags it through the war. Same viewWin the buttons drive, so pinching
+   and the Zoom row stay in agreement. Bound to the timeline chart and both
+   turtle-style boards. */
+function applyWindow(span, end){
+  const lo=war.start, hi=warHi(), full=hi-lo;
+  zoomSpan = Math.min(Math.max(span, MIN_SPAN), full);
+  if(zoomSpan>=full) zoomSpan=0;
+  const sp = zoomSpan||full;
+  let v1 = Math.min(hi, Math.max(lo+sp, end));
+  liveMode = v1>=hi;
+  viewEnd = v1;
+  scrubT = Math.min(Math.max(scrubT, v1-sp), v1);
+  renderScrubOnly(); renderTable(); renderTimelines(); renderMedLog(); renderArmoury();
+}
+function bindPinch(el, allowPan){
+  if(!el || el.dataset.pinch) return;
+  el.dataset.pinch="1";
+  let mode=null, startSpan=0, startEnd=0, startMid=0, startDist=0, startX=0, w=1;
+  const dist=t=>Math.abs(t[0].clientX-t[1].clientX);
+  const mid =t=>(t[0].clientX+t[1].clientX)/2;
+  el.addEventListener("touchstart",e=>{
+    if(!war) return;
+    const [v0,v1]=viewWin();
+    startSpan=v1-v0; startEnd=v1; w=el.getBoundingClientRect().width||1;
+    if(e.touches.length===2){ mode="pinch"; startDist=dist(e.touches)||1;
+      const r=el.getBoundingClientRect();
+      startMid = v0 + ((mid(e.touches)-r.left)/w)*startSpan;      // time under the fingers
+      e.preventDefault();
+    } else if(allowPan && e.touches.length===1){ mode="pan"; startX=e.touches[0].clientX }
+  }, {passive:false});
+  el.addEventListener("touchmove",e=>{
+    if(!mode||!war) return;
+    if(mode==="pinch" && e.touches.length===2){
+      e.preventDefault();
+      const span=Math.max(MIN_SPAN, startSpan*(startDist/(dist(e.touches)||1)));
+      // keep the moment under the fingers roughly still
+      const frac=(startMid-(startEnd-startSpan))/startSpan;
+      applyWindow(span, startMid + span*(1-frac));
+    } else if(mode==="pan" && e.touches.length===1){
+      const dx=e.touches[0].clientX-startX;
+      if(Math.abs(dx)<6) return;
+      e.preventDefault();
+      applyWindow(startSpan, startEnd - (dx/w)*startSpan);
+    }
+  }, {passive:false});
+  const end=()=>{ mode=null };
+  el.addEventListener("touchend",end); el.addEventListener("touchcancel",end);
+  // trackpads and mice: ctrl/⌘ + wheel zooms, like every other chart
+  el.addEventListener("wheel",e=>{
+    if(!war || !(e.ctrlKey||e.metaKey)) return;
+    e.preventDefault();
+    const [v0,v1]=viewWin(), span=v1-v0;
+    const r=el.getBoundingClientRect();
+    const at = v0 + ((e.clientX-r.left)/(r.width||1))*span;
+    const next = Math.max(MIN_SPAN, span*(e.deltaY>0? 1.25 : 0.8));
+    const frac=(at-v0)/span;
+    applyWindow(next, at + next*(1-frac));
+  }, {passive:false});
+}
+function bindCharts(){
+  bindPinch($("spark").parentElement, false);   // single finger already drags the marker here
+  bindPinch($("tlRows"), true);
+  bindPinch($("armRows"), true);
+}
+
+/* ---------- war payout ----------
+   Two ways leadership actually pays: a set rate per hit, or a pot split by
+   effort. Both use the same weighting — a pre-terms hit is the hard one, and
+   once terms are agreed a hit is worth what an assist is worth, which is the
+   rule this faction uses. Figures follow the ledger's window, so a finished
+   war pays on the whole war. */
+function payCfg(){
+  const n=v=>Math.max(0, Math.round(+String(v??"").replace(/[^0-9.]/g,"")||0));
+  const link = cfg.payLink!==false;
+  const assist = n(cfg.payAssist ?? 250000);
+  return { mode: cfg.payMode||"rate", link,
+    pre: n(cfg.payPre ?? 1000000),
+    post: link? assist : n(cfg.payPost ?? assist),
+    assist, pot: n(cfg.payPot ?? 0) };
+}
+function renderPay(){
+  const c=payCfg(), potMode=c.mode==="pot";
+  $("payMode").value=c.mode;
+  $("payPre").value=c.pre? fmtNum(c.pre):"";
+  $("payPost").value=c.post? fmtNum(c.post):"";
+  $("payAssist").value=c.assist? fmtNum(c.assist):"";
+  $("payPot").value=c.pot? fmtNum(c.pot):"";
+  $("payLink").checked=c.link;
+  $("payPost").disabled=c.link;
+  for(const id of ["payPotLbl","payPot"]) $(id).hidden=!potMode;
+  $("payL1").textContent = potMode? "Pre-terms hit weight" : "Pre-terms hit $";
+  $("payL2").textContent = potMode? "Post-terms hit weight" : "Post-terms hit $";
+  $("payL3").textContent = potMode? "Assist weight" : "Assist $";
+
+  const rows=aggregate(scrubT).filter(r=>r.of||r.as);
+  const pts=r=>r.of1*c.pre + r.of2*c.post + r.as*c.assist;
+  const total=rows.reduce((x,r)=>x+pts(r),0);
+  const payOf=r=> potMode? (total? Math.round(c.pot*pts(r)/total) : 0) : pts(r);
+  rows.sort((a,b)=>payOf(b)-payOf(a));
+  const paid=rows.reduce((x,r)=>x+payOf(r),0);
+  payRows=rows.map(r=>({name:r.name, pay:payOf(r)}));
+
+  $("payMeta").textContent = war.terms? "split at terms · "+fmtDT(war.terms)+" TCT"
+    : "no terms set — every hit pays the pre-terms rate";
+  $("paytblBody").innerHTML = rows.length? rows.map(r=>{
+    const share = total? (100*pts(r)/total) : 0;
+    return `<tr><td style="text-align:left" class="name">${esc(r.name)}</td>`
+      + `<td class="${r.of1?'':'zero'}">${r.of1}</td><td class="${r.of2?'':'zero'}">${r.of2}</td>`
+      + `<td class="${r.as?'':'zero'}">${r.as}</td>`
+      + `<td class="meta">${share.toFixed(1)}%</td>`
+      + `<td class="pos"><b>$${fmtNum(payOf(r))}</b></td></tr>`;
+  }).join("") : `<tr><td colspan="6" class="meta">No war hits logged yet.</td></tr>`;
+  $("paytblFoot").innerHTML=`<td style="text-align:left">Total</td>`
+    + `<td>${rows.reduce((x,r)=>x+r.of1,0)}</td><td>${rows.reduce((x,r)=>x+r.of2,0)}</td>`
+    + `<td>${rows.reduce((x,r)=>x+r.as,0)}</td><td></td><td class="pos"><b>$${fmtNum(paid)}</b></td>`;
+  $("payHint").innerHTML = potMode
+    ? `Each member's share of the pot is their effort over everyone's, using the weights above. `
+      + `Rounding means the paid total can differ from the pot by a few dollars.`
+    : `Straight rate per hit. A pre-terms hit is the hard one; once terms are agreed a hit pays the assist rate `
+      + `— untick that box to price post-terms hits separately.`;
+  $("payHint").innerHTML += war.terms? "" : ` <b>No terms are set</b>, so everything counts as pre-terms.`;
+}
+let payRows=[];
+function payText(){ return payRows.map(r=>`${r.name}: $${fmtNum(r.pay)}`).join("\n") }
+for(const id of ["payPre","payPost","payAssist","payPot"]) $(id).onchange=()=>{
+  const n=v=>Math.max(0, Math.round(+String(v||"").replace(/[^0-9.]/g,"")||0));
+  cfg.payPre=n($("payPre").value); cfg.payPost=n($("payPost").value);
+  cfg.payAssist=n($("payAssist").value); cfg.payPot=n($("payPot").value);
+  save(LS.cfg,cfg); renderPay();
+};
+$("payMode").onchange=()=>{ cfg.payMode=$("payMode").value; save(LS.cfg,cfg); renderPay() };
+$("payLink").onchange=()=>{ cfg.payLink=$("payLink").checked; save(LS.cfg,cfg); renderPay() };
+$("payCopy").onclick=async()=>{
+  try{ await navigator.clipboard.writeText(payText()); $("payCopied").textContent="copied "+payRows.length+" lines" }
+  catch(e){ $("payCopied").textContent="couldn't copy — "+e.message }
+  setTimeout(()=>$("payCopied").textContent="",4000);
+};
+$("payCsv").onclick=()=>{
+  const c=payCfg();
+  let csv="member,hits_pre,hits_post,assists,payout\n";
+  for(const r of aggregate(scrubT).filter(r=>r.of||r.as)){
+    const pay=payRows.find(x=>x.name===r.name);
+    csv+=[JSON.stringify(r.name), r.of1, r.of2, r.as, pay? pay.pay:0].join(",")+"\n";
+  }
+  const b=new Blob([csv],{type:"text/csv"}); const u=URL.createObjectURL(b);
+  const a=document.createElement("a"); a.href=u; a.download=`payout-${war.oppName||"war"}-${fmtDate(war.start)}.csv`; a.click();
+  URL.revokeObjectURL(u);
+};
+
 /* ---------- csv ---------- */
 $("csvBtn").onclick=()=>{
   const rows=aggregate(scrubT);
@@ -1906,7 +2124,7 @@ $("switchWar").onclick = async ()=>{
   // this war" — the picker's Continue button needs it to still be there.
   const wasTracking = war;
   liveMode=true;
-  for(const id of ["scrubCard","tableCard","tlCard","medCard","armCard","qualityCard"]) $(id).hidden=true;
+  for(const id of ["scrubCard","tableCard","tlCard","medCard","armCard","payCard","qualityCard"]) $(id).hidden=true;
   $("settings").hidden=true; $("switchWar").hidden=true; $("vsline").hidden=true;
   $("pollmeta").textContent="dashboard"; $("dot").className="statusdot";
   try{ await loadWarList() }catch(e){}
