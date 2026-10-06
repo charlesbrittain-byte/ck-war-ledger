@@ -841,7 +841,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 16:40</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 16:48</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2529,8 +2529,12 @@ $("dashTabs").addEventListener("click",e=>{ const b=e.target.closest("button[dat
 const ZOOMS=new Map();
 function makeZoomable(id, scrollEl, contentEl, barEl){
   if(!scrollEl||!contentEl) return;
-  let z=ZOOMS.get(id)?.z || 1;
-  const state={z, scrollEl, contentEl, barEl};
+  // One state per strip, created once. Rebinding used to make a second state:
+  // the touch handlers kept updating the first while the buttons read the
+  // second, which still thought it was at 1× and so greyed itself out.
+  const existing=ZOOMS.get(id);
+  if(existing && existing.scrollEl===scrollEl){ existing.redraw(); return }
+  const state={z:1, scrollEl, contentEl, barEl};
   ZOOMS.set(id,state);
   const MAXZ=40;
   state.apply=(nz, anchorClientX)=>apply(nz, anchorClientX);
