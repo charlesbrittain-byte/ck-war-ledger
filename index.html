@@ -482,7 +482,7 @@ details.settings summary{cursor:pointer}
       <tbody id="octptblBody"></tbody>
     </table>
   </div>
-  <p class="hint">Everyone on the roster, slackers first. "In one now" counts crimes still recruiting or planning, so someone who has joined the next one is not chased for the last one. Members who joined the faction inside the window are marked, since they cannot have joined crimes that ran before they arrived. The percentage beside a current crime is their pass rate in that slot — green at 65 and over, amber to 55, red below — so a bad fit can be swapped before it runs.</p>
+  <p class="hint">Everyone on the roster, slackers first. "In one now" counts crimes still recruiting or planning, so someone who has joined the next one is not chased for the last one. Members who joined the faction inside the window are marked with *, and their days in / idle are counted only from the day they arrived — judging them on crimes that ran before they were here would be meaningless. The percentage beside a current crime is their pass rate in that slot — green at 65 and over, amber to 55, red below — so a bad fit can be swapped before it runs.</p>
 </section>
 
 <!-- OC BY CRIME -->
@@ -744,7 +744,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:23</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:27</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2470,8 +2470,18 @@ function renderOC(){
 
   $("ocHead").innerHTML=OC_COLS.map(c=>
     `<th data-k="${c.k}" class="${ocSort.k===c.k?"sorted":""}" style="${c.left?"text-align:left":""}">${c.label}</th>`).join("");
+  // Somebody who joined the faction mid-range can only be judged on the days
+  // they were actually here — counting the rest as idle is just wrong.
+  const spanFor=id=>{
+    const j=memberDir[id] && memberDir[id].joined;
+    const start = (j && j>from)? j : from;
+    return Math.max(1, Math.round((to-start)/86400));
+  };
   for(const p of Object.values(per)){
-    p.inDays=p.days.size; p.idle=Math.max(0, days-p.inDays); p.pass=p.passN? p.passSum/p.passN : null;
+    p.inDays=p.days.size; p.pass=p.passN? p.passSum/p.passN : null;
+    p.span=spanFor(p.id);
+    p.idle=Math.max(0, p.span-p.inDays);
+    p.part = (memberDir[p.id] && memberDir[p.id].joined && memberDir[p.id].joined>from) || false;
     p.ex = !memberDir[p.id];                     // no longer on the roster
   }
   const hideEx = $("ocHideEx").checked;
@@ -2483,15 +2493,17 @@ function renderOC(){
   });
   $("octblBody").innerHTML = rows.length? rows.map(r=>{
     const pct=r.n? Math.round(100*r.ok/r.n):0;
-    const idlePct=days? r.idle/days : 0;
+    const idlePct=r.span? r.idle/r.span : 0;
     return `<tr><td style="text-align:left" class="name ocjump" data-oid="${r.id}" title="Click for every crime they joined">${esc(r.name)}</td>`
       + `<td>${r.n}</td>`
       + `<td><span class="rec"><span class="w pos">${r.ok}</span><span class="sl">/</span>`
         + `<span class="l ${r.fail?"neg":"zero"}">${r.fail}</span>`
         + `<span class="pc ${pct>=70?"pos":pct>=50?"":"neg"}">${pct}%</span></span></td>`
       + passCell(r.pass)
-      + `<td><span class="rec"><span class="w">${r.inDays}</span><span class="sl">/</span>`
-        + `<span class="l ${idlePct>0.5?"neg":idlePct>0.25?"warn":"zero"}">${r.idle}</span></span></td>`
+      + `<td title="${r.part? `in the faction ${r.span} of the ${days} days` : `over ${r.span} days`}">`
+        + `<span class="rec"><span class="w">${r.inDays}</span><span class="sl">/</span>`
+        + `<span class="l ${idlePct>0.5?"neg":idlePct>0.25?"warn":"zero"}">${r.idle}</span>`
+        + (r.part? `<span class="meta" style="margin-left:4px">*</span>`:"") + `</span></td>`
       + `<td style="color:var(--amber)">${fmtNum(r.resp)}</td>`
       + `<td class="pos"><b>${fmtCash(r.pay)}</b></td></tr>`;
   }).join("") : `<tr><td colspan="7" class="meta">No completed crimes in this window.</td></tr>`;
@@ -2507,7 +2519,8 @@ function renderOC(){
   $("ocHint").innerHTML = (exCount? `<b>${exCount} former member${exCount>1?"s":""} ${hideEx?"hidden":"shown"}</b> — they are in the crime history but have left the faction, so they show as a bare id. ` : "")
     + `Completed crimes only. <b>Pass rate</b> is the checkpoint pass rate on their slots, averaged — green at 65 and over, amber to 55, red below. `
     + `<b>Click a name</b> for every crime they joined, with its level — useful when someone's fail rate looks off. `
-    + `<b>Days idle</b> is days in this range they were in no crime at all, waiting or running; that is the number to chase. `
+    + `<b>Days in / idle</b> splits the range into days they were sitting in a crime and days they were not; idle is the number to chase. `
+    + `A * means they joined the faction partway through, so their count runs from the day they arrived rather than the start of the range. `
     + `<b>Payout share</b> is the money at the percentage leadership actually paid, split across the filled slots. `
     + `Respect per member is each crime's respect over its team, so that column can total a point or two off the headline. Sort any column; hover a name for the roles they filled.`;
 
@@ -2520,20 +2533,26 @@ function renderOC(){
   }
   const roster=Object.keys(memberDir).length? Object.keys(memberDir).map(id=>+id) : Object.keys(per).map(id=>+id);
   const part=roster.map(id=>{
-    const p=per[id]||{n:0,last:0,roles:{},inDays:0,idle:days};
+    const md0=memberDir[id]||{};
+    const mSpan=Math.max(1, Math.round((to-((md0.joined&&md0.joined>from)? md0.joined : from))/86400));
+    const p=per[id]||{n:0,last:0,roles:{},inDays:0,idle:mSpan,span:mSpan};
     const md=memberDir[id]||{};
     const newish = md.joined && md.joined>from;
     const role=Object.entries(p.roles).sort((a,b)=>b[1]-a[1])[0];
     return {id, name:md.name||("["+id+"]"), n:p.n, last:p.last, now:inNow[id], newish, role:role?role[0]:null,
-            inDays:p.inDays||0, idle:(p.idle==null? days : p.idle)};
+            inDays:p.inDays||0, idle:(p.idle==null? mSpan : p.idle), span:p.span||mSpan};
   }).sort((a,b)=> a.n-b.n || (b.last||0)-(a.last||0));
   const idle=part.filter(p=>!p.n && !p.now).length;
-  $("ocPartMeta").textContent=`${part.length} members · ${idle} with nothing in this range`;
+  const partial=part.filter(p=>p.newish).length;
+  $("ocPartMeta").textContent=`${part.length} members · ${idle} with nothing in this range`
+    + (partial? ` · ${partial} joined mid-range` : "");
   $("octptblBody").innerHTML=part.map(p=>
     `<tr><td style="text-align:left" class="name">${esc(p.name)}${p.newish?' <span class="meta">(new)</span>':""}</td>`
     + `<td class="${p.n?"pos":"neg"}"><b>${p.n}</b></td>`
-    + `<td><span class="rec"><span class="w">${p.inDays}</span><span class="sl">/</span>`
-      + `<span class="l ${p.idle>days*0.5?"neg":p.idle>days*0.25?"warn":"zero"}">${p.idle}</span></span></td>`
+    + `<td title="${p.newish? `in the faction ${p.span} of the ${days} days` : `over ${p.span} days`}">`
+      + `<span class="rec"><span class="w">${p.inDays}</span><span class="sl">/</span>`
+      + `<span class="l ${p.idle>p.span*0.5?"neg":p.idle>p.span*0.25?"warn":"zero"}">${p.idle}</span>`
+      + (p.newish? `<span class="meta" style="margin-left:4px">*</span>`:"") + `</span></td>`
     + `<td style="text-align:left" class="meta">${p.last? fmtDate(p.last)+" · "+ago(p.last) : "—"}</td>`
     + `<td style="text-align:left" class="${p.now?"pos":"zero"}">${p.now? esc(p.now.name)+" ("+p.now.status.toLowerCase()+")"
         + (p.now.pass!=null? ` <b class="${passCls(p.now.pass)}">${Math.round(p.now.pass)}%</b>`:"") : "—"}</td>`
