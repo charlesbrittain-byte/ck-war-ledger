@@ -220,7 +220,7 @@ details.settings summary{cursor:pointer}
   /* the compact view, when you ask for it, drops the columns below */
   body.cols-all .c-as, body.cols-all .c-rl, body.cols-all .c-lastHit, body.cols-all .c-status, body.cols-all .c-rg,
   body.cols-all .h-lvl, body.cols-all .h-as, body.cols-all .h-rl, body.cols-all .h-ff, body.cols-all .h-ag,
-  body.cols-all .f-wars, body.cols-all .f-of, body.cols-all .f-ocN,
+  body.cols-all .f-wars, body.cols-all .f-ocN,
   body.cols-all .a-other, body.cols-all .w-morph, body.cols-all .w-blood, body.cols-all .w-other,
   body.cols-all .w-pts, body.cols-all .w-refill{display:table-cell !important}
   body.cols-all #octbl th, body.cols-all #octbl td,
@@ -264,7 +264,7 @@ details.settings summary{cursor:pointer}
   #mdtbl th:nth-child(5), #mdtbl td:nth-child(5),
   #mdtbl th:nth-child(6), #mdtbl td:nth-child(6){display:none}
   /* faction overview: totals go, the per-war and per-crime rates stay */
-  .f-wars, .f-of, .f-ocN{display:none}
+  .f-wars, .f-ocN{display:none}
   /* OC member table (Member, Crimes, Record, Chance, Days in, Idle, Respect, Payout):
      drop days-in and respect, keep chance and idle — those are the ones acted on */
   #octbl th:nth-child(2), #octbl td:nth-child(2),
@@ -457,7 +457,7 @@ details.settings summary{cursor:pointer}
       <tfoot><tr id="hatblFoot"></tr></tfoot>
     </table>
   </div>
-  <p class="hint">Faction armoury only — items someone bought themselves never appear. Weekends are shaded, so a training weekend shows up as a burst of xanax against the grey. Each tick is the exact minute an item was taken; hover one to see what it was.</p>
+  <p class="hint">Faction armoury only — items someone bought themselves never appear. Pinch to zoom in and drag to slide along, so you can see who did what and when. Weekends are shaded, so a training weekend shows up as a burst of xanax against the grey. Each tick is the exact minute an item was taken; hover one to see what it was.</p>
 </section>
 
 <!-- ORGANISED CRIME -->
@@ -779,7 +779,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 11:12</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 13:17</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2076,9 +2076,9 @@ async function loadHomeArm(){
       if(m) evs.push({t:n.timestamp, id:+m[1], name:m[2], item:m[3]+" faction points", cls:"pts", pts:+m[3].replace(/,/g,"")});
     }
     evs.sort((a,b)=>a.t-b.t);
-    homeArm={evs, from, to, at:now()};
+    homeArm={evs, from, to, at:now(), fetchedFrom:from, fetchedTo:to};
     $("homeArmProg").textContent = evs.length? "" : "nothing logged in this period";
-    renderHomeArm();
+    renderHomeArm(); bindDashCharts();
   }catch(e){ $("homeArmProg").textContent=e.message }
   finally{ btn.disabled=false }
 }
@@ -2315,9 +2315,82 @@ function showTab(t){
   if(dashTab==="faction"){ if(!homeRows) loadHome(); if(!ocRaw) loadOC(); if(!homeArm) loadHomeArm(); renderFaction() }
   if(dashTab==="war" && !homeRows) loadHome();
   if(dashTab==="oc" && !ocRaw) loadOC();
+  bindDashCharts();
   window.scrollTo(0,0);
 }
 $("dashTabs").addEventListener("click",e=>{ const b=e.target.closest("button[data-tab]"); if(b) showTab(b.dataset.tab) });
+
+/* ---------- pinch and drag on a date-range chart ----------
+   The war charts pinch against viewWin; these two run off their own date
+   range instead, so they get their own binding: two fingers change the span
+   around the point between them, one finger slides it, ⌘/Ctrl + scroll does
+   the same on a trackpad. */
+function bindRangePinch(el, get, set, minSpan){
+  if(!el || el.dataset.rpinch) return;
+  el.dataset.rpinch="1";
+  const MIN=minSpan||2*86400;
+  let mode=null, r0=null, startDist=0, startX=0, w=1, anchor=0;
+  const dist=t=>Math.abs(t[0].clientX-t[1].clientX);
+  const mid =t=>(t[0].clientX+t[1].clientX)/2;
+  el.addEventListener("touchstart",e=>{
+    r0=get(); if(!r0) return;
+    const rect=el.getBoundingClientRect(); w=rect.width||1;
+    if(e.touches.length===2){
+      mode="pinch"; startDist=dist(e.touches)||1;
+      anchor = r0.from + ((mid(e.touches)-rect.left)/w)*(r0.to-r0.from);
+      e.preventDefault();
+    } else if(e.touches.length===1){ mode="pan"; startX=e.touches[0].clientX }
+  },{passive:false});
+  el.addEventListener("touchmove",e=>{
+    if(!mode||!r0) return;
+    const span0=r0.to-r0.from;
+    if(mode==="pinch" && e.touches.length===2){
+      e.preventDefault();
+      const span=Math.max(MIN, span0*(startDist/(dist(e.touches)||1)));
+      const frac=(anchor-r0.from)/span0;
+      set(anchor-span*frac, anchor+span*(1-frac));
+    } else if(mode==="pan" && e.touches.length===1){
+      const dx=e.touches[0].clientX-startX;
+      if(Math.abs(dx)<6) return;
+      e.preventDefault();
+      const shift=-(dx/w)*span0;
+      set(r0.from+shift, r0.to+shift);
+    }
+  },{passive:false});
+  const done=()=>{ mode=null };
+  el.addEventListener("touchend",done); el.addEventListener("touchcancel",done);
+  el.addEventListener("wheel",e=>{
+    const r=get(); if(!r || !(e.ctrlKey||e.metaKey)) return;
+    e.preventDefault();
+    const rect=el.getBoundingClientRect(), span0=r.to-r.from;
+    const at = r.from + ((e.clientX-rect.left)/(rect.width||1))*span0;
+    const span=Math.max(MIN, span0*(e.deltaY>0? 1.25 : 0.8));
+    const frac=(at-r.from)/span0;
+    set(at-span*frac, at+span*(1-frac));
+  },{passive:false});
+}
+function bindDashCharts(){
+  // OC trend: a week is the tightest that still says anything through the smoothing
+  bindRangePinch($("ocChart"),
+    ()=>ocRaw? ocRange() : null,
+    (from,to)=>{
+      const hi=now();
+      if(to>hi){ from-=to-hi; to=hi }
+      cfg.ocFrom=dayStr(Math.max(0,from)); cfg.ocTo=dayStr(to);
+      save(LS.cfg,cfg); renderOC();
+    }, 7*86400);
+  // armoury board: clamped to what was actually fetched, so you cannot pan into nothing
+  bindRangePinch($("homeArmRows"),
+    ()=>homeArm? {from:homeArm.from, to:homeArm.to} : null,
+    (from,to)=>{
+      if(!homeArm) return;
+      const lo=homeArm.fetchedFrom ?? homeArm.from, hi=homeArm.fetchedTo ?? homeArm.to;
+      const span=Math.min(to-from, hi-lo);
+      if(from<lo){ from=lo; to=lo+span }
+      if(to>hi){ to=hi; from=hi-span }
+      homeArm.from=from; homeArm.to=to; renderHomeArm();
+    }, 86400);
+}
 
 /* ---------- faction overview ----------
    One row per member pulling both halves together: how they fight and how they
@@ -2328,9 +2401,8 @@ let facSort={k:"hitsPerWar",dir:-1};
 const FAC_COLS=[
   {k:"name",       label:"Member", left:true},
   {k:"wars",       label:"Wars"},
-  {k:"of",         label:"Hits"},
   {k:"hitsPerWar", label:"Hits / war"},
-  {k:"ocN",        label:"Crimes"},
+  {k:"ocN",        label:"OCs"},
   {k:"ocRate",     label:"Won / lost"},
   {k:"pass",       label:"Pass rate"},
   {k:"idle",       label:"Days in / idle"}
@@ -2363,7 +2435,6 @@ function renderFaction(){
     const idlePct=r.span? r.idle/r.span : 0;
     return `<tr><td style="text-align:left" class="name f-name">${esc(r.name)}</td>`
       + `<td class="f-wars">${r.wars||"–"}</td>`
-      + `<td class="f-of">${r.of? fmtNum(r.of):"–"}</td>`
       + `<td class="f-hitsPerWar ${r.hitsPerWar>=40?"pos":r.hitsPerWar>=15?"":"neg"}"><b>${r.hitsPerWar? r.hitsPerWar.toFixed(0):"–"}</b></td>`
       + `<td class="f-ocN">${r.ocN||"–"}</td>`
       + `<td class="f-ocRate">${r.ocN? `<span class="rec"><span class="w pos">${r.ocOk}</span><span class="sl">/</span>`
@@ -2373,12 +2444,12 @@ function renderFaction(){
       + `<td class="f-idle">${r.span? `<span class="rec"><span class="w">${r.inDays}</span><span class="sl">/</span>`
         + `<span class="l ${idlePct>0.5?"neg":idlePct>0.25?"warn":"zero"}">${r.idle}</span>`
         + (r.part? `<span class="meta" style="margin-left:4px">*</span>`:"") + `</span>` : `<span class="zero">–</span>`}</td></tr>`;
-  }).join("") : `<tr><td colspan="8" class="meta">Load the war history and crimes to fill this in.</td></tr>`;
+  }).join("") : `<tr><td colspan="7" class="meta">Load the war history and crimes to fill this in.</td></tr>`;
   const S=k=>rows.reduce((x,r)=>x+(r[k]||0),0);
   const passAll=rows.filter(r=>r.pass!=null);
   const avgPass=passAll.length? passAll.reduce((x,r)=>x+r.pass,0)/passAll.length : null;
   $("factblFoot").innerHTML=`<td style="text-align:left" class="f-name">Total</td><td class="f-wars"></td>`
-    + `<td class="f-of">${fmtNum(S("of"))}</td><td class="f-hitsPerWar"></td><td class="f-ocN">${S("ocN")}</td>`
+    + `<td class="f-hitsPerWar"></td><td class="f-ocN">${S("ocN")}</td>`
     + `<td class="f-ocRate"><span class="rec"><span class="w pos">${S("ocOk")}</span><span class="sl">/</span>`
       + `<span class="l neg">${S("ocFail")}</span><span class="pc"></span></span></td>`
     + `<td class="f-pass ${passCls(avgPass)}">${avgPass==null?"–":Math.round(avgPass)+"%"}</td><td class="f-idle"></td>`;
@@ -2452,7 +2523,7 @@ async function loadOC(){
     }
     ocRaw={ done:(done.crimes||[]), live:(live.crimes||[]), at:now() };
     $("ocProg").textContent="";
-    renderOC(); if(!$("facCard").hidden) renderFaction();
+    renderOC(); bindDashCharts(); if(!$("facCard").hidden) renderFaction();
   }catch(e){ $("ocProg").textContent=e.message }
   finally{ btn.disabled=false }
 }
