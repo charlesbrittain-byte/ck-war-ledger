@@ -213,7 +213,11 @@ details.settings summary{cursor:pointer}
   .wrap{padding:0 11px}
   h2{font-size:14px}
   .tl-name{width:92px; min-width:92px}
-  /* ...unless you ask for everything back, which scrolls sideways by choice */
+  /* Everything is shown by default on a phone and the tables scroll sideways;
+     max-content stops them squashing into the screen instead. */
+  body.cols-all table{min-width:max-content !important}
+  body.cols-all .tblwrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  /* the compact view, when you ask for it, drops the columns below */
   body.cols-all .c-as, body.cols-all .c-rl, body.cols-all .c-lastHit, body.cols-all .c-status, body.cols-all .c-rg,
   body.cols-all .h-lvl, body.cols-all .h-as, body.cols-all .h-rl, body.cols-all .h-ff, body.cols-all .h-ag,
   body.cols-all .f-wars, body.cols-all .f-of, body.cols-all .f-ocN,
@@ -241,6 +245,14 @@ details.settings summary{cursor:pointer}
   td{white-space:nowrap}
   td.name{font-size:14.5px}
   .tblwrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  body.cols-all .tblwrap{
+    background:linear-gradient(to right, var(--panel) 30%, rgba(28,32,37,0)),
+               linear-gradient(to left, var(--panel) 30%, rgba(28,32,37,0)) 100% 0,
+               radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.4), transparent),
+               radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.4), transparent) 100% 0;
+    background-repeat:no-repeat; background-size:36px 100%, 36px 100%, 14px 100%, 14px 100%;
+    background-attachment:local, local, scroll, scroll;
+  }
   /* member ledger: keep who, hits, respect won, hits taken, net */
   .c-as, .c-rl, .c-lastHit{display:none}
   /* faction form: keep who, wars, hits, respect won, hits taken, net */
@@ -767,7 +779,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:42</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:49</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -1099,7 +1111,7 @@ function startTracking(){
   $("pAtk").value=cfg.pAtk; $("pMem").value=cfg.pMem;
   $("syncUrl").value=cfg.syncUrl||""; $("syncTok").value=cfg.syncTok||"";
   if(cfg.tlTall){ $("tlRows").classList.add("tl-tall"); $("tlTall").className="on" }
-  if(cfg.colsAll){ document.body.classList.add("cols-all"); $("colsBtn").textContent="⤢ Fewer columns" }
+  if(cfg.colsAll!==false){ document.body.classList.add("cols-all"); $("colsBtn").textContent="⤢ Fewer columns" }
   $("syncTest").checked = !!cfg.syncTest;
   $("syncByFac").checked = !!cfg.syncByFac;
   if(cfg.syncUrl){ fetchServerSnaps().then(c=>{ if(c) renderAll() }); fetchTerms().then(c=>{ if(c) renderAll() }) }
