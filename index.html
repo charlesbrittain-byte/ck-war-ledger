@@ -252,12 +252,13 @@ details.settings summary{cursor:pointer}
   #mdtbl th:nth-child(6), #mdtbl td:nth-child(6){display:none}
   /* OC member table (Member, Crimes, Record, Chance, Days in, Idle, Respect, Payout):
      drop days-in and respect, keep chance and idle — those are the ones acted on */
-  #octbl th:nth-child(5), #octbl td:nth-child(5),
-  #octbl th:nth-child(7), #octbl td:nth-child(7){display:none}
+  #octbl th:nth-child(2), #octbl td:nth-child(2),
+  #octbl th:nth-child(6), #octbl td:nth-child(6){display:none}
   /* per-member popup (Crime, Level, Chance, Ran, Role, Result, Payout): role goes */
   #ocmtbl th:nth-child(5), #ocmtbl td:nth-child(5){display:none}
   /* participation: the role they usually fill is the least urgent column */
-  #octptbl th:nth-child(5), #octptbl td:nth-child(5){display:none}
+  #octptbl th:nth-child(4), #octptbl td:nth-child(4),
+  #octptbl th:nth-child(6), #octptbl td:nth-child(6){display:none}
   /* by crime: difficulty and the faction slice */
   #octytbl th:nth-child(2), #octytbl td:nth-child(2),
   #octytbl th:nth-child(8), #octytbl td:nth-child(8){display:none}
@@ -293,7 +294,6 @@ details.settings summary{cursor:pointer}
   .c-rg{display:none}
   .h-ag{display:none}
   #octytbl th:nth-child(6), #octytbl td:nth-child(6){display:none}   /* respect, on by-crime */
-  #octbl th:nth-child(2), #octbl td:nth-child(2){display:none}       /* crime count: the record implies it */
   #ocmtbl th:nth-child(4), #ocmtbl td:nth-child(4){display:none}     /* popup date: the list is newest first */
 }
 @media (prefers-reduced-motion:reduce){ *{transition:none!important; animation:none!important} }
@@ -444,9 +444,9 @@ details.settings summary{cursor:pointer}
     <select id="ocSmooth" style="padding:4px 8px">
       <option value="1">off</option>
       <option value="7">7-day average</option>
-      <option value="14" selected>14-day average</option>
+      <option value="14">14-day average</option>
       <option value="21">21-day average</option>
-      <option value="30">30-day average</option>
+      <option value="30" selected>30-day average</option>
     </select>
     <button id="ocLoad" class="primary">Reload</button>
     <span class="meta" id="ocProg"></span>
@@ -478,7 +478,7 @@ details.settings summary{cursor:pointer}
   </div>
   <div class="tblwrap">
     <table id="octptbl" style="min-width:620px">
-      <thead><tr><th style="text-align:left">Member</th><th>Joined</th><th style="text-align:left">Last joined</th><th style="text-align:left">In one now</th><th style="text-align:left">Usual role</th></tr></thead>
+      <thead><tr><th style="text-align:left">Member</th><th>Joined</th><th>Days in / idle</th><th style="text-align:left">Last joined</th><th style="text-align:left">In one now</th><th style="text-align:left">Usual role</th></tr></thead>
       <tbody id="octptblBody"></tbody>
     </table>
   </div>
@@ -744,7 +744,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:17</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:23</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2294,8 +2294,7 @@ const OC_COLS=[
   {k:"n",      label:"Crimes"},
   {k:"rate",   label:"Won / lost"},
   {k:"pass",   label:"Pass rate"},
-  {k:"inDays", label:"Days in"},
-  {k:"idle",   label:"Days idle"},
+  {k:"idle",   label:"Days in / idle"},
   {k:"resp",   label:"Respect"},
   {k:"pay",    label:"Payout share"}
 ];
@@ -2346,7 +2345,7 @@ function ocWindow(){
 }
 function drawOcChart(crimes, from, to){
   const svg=$("ocChart"), W=1000, H=170, padL=26, padR=26, padT=18, padB=26;
-  const smooth=Math.max(1, +cfg.ocSmooth||14);
+  const smooth=Math.max(1, +cfg.ocSmooth||30);
   if(!crimes.length){ svg.innerHTML=""; $("ocChartLegend").hidden=true; $("ocTrend").innerHTML=""; return }
   $("ocChartLegend").hidden=false;
   $("ocSmoothNote").textContent = smooth>1? `${smooth}-day rolling average` : "daily totals";
@@ -2420,7 +2419,7 @@ function drawOcChart(crimes, from, to){
 function renderOC(){
   const rg=ocRange();
   $("ocFrom").value=dayStr(rg.from); $("ocTo").value=dayStr(rg.to);
-  $("ocSmooth").value=String(cfg.ocSmooth||14);
+  $("ocSmooth").value=String(cfg.ocSmooth||30);
   $("ocHideEx").checked = cfg.ocHideEx!==false;
   if(!ocRaw){
     $("octblBody").innerHTML=`<tr><td colspan="7" class="meta">Loading…</td></tr>`;
@@ -2491,8 +2490,8 @@ function renderOC(){
         + `<span class="l ${r.fail?"neg":"zero"}">${r.fail}</span>`
         + `<span class="pc ${pct>=70?"pos":pct>=50?"":"neg"}">${pct}%</span></span></td>`
       + passCell(r.pass)
-      + `<td>${r.inDays}</td>`
-      + `<td class="${idlePct>0.5?"neg":idlePct>0.25?"":"zero"}">${r.idle}</td>`
+      + `<td><span class="rec"><span class="w">${r.inDays}</span><span class="sl">/</span>`
+        + `<span class="l ${idlePct>0.5?"neg":idlePct>0.25?"warn":"zero"}">${r.idle}</span></span></td>`
       + `<td style="color:var(--amber)">${fmtNum(r.resp)}</td>`
       + `<td class="pos"><b>${fmtCash(r.pay)}</b></td></tr>`;
   }).join("") : `<tr><td colspan="7" class="meta">No completed crimes in this window.</td></tr>`;
@@ -2502,7 +2501,7 @@ function renderOC(){
     + `<td><span class="rec"><span class="w pos">${S("ok")}</span><span class="sl">/</span>`
       + `<span class="l neg">${S("fail")}</span><span class="pc"></span></span></td>`
     + passCell(passAll.length? passAll.reduce((x,r)=>x+r.pass,0)/passAll.length : null)
-    + `<td></td><td></td>`
+    + `<td></td>`
     + `<td style="color:var(--amber)">${fmtNum(S("resp"))}</td><td class="pos"><b>${fmtCash(S("pay"))}</b></td>`;
   ocPer=per;
   $("ocHint").innerHTML = (exCount? `<b>${exCount} former member${exCount>1?"s":""} ${hideEx?"hidden":"shown"}</b> — they are in the crime history but have left the faction, so they show as a bare id. ` : "")
@@ -2521,17 +2520,20 @@ function renderOC(){
   }
   const roster=Object.keys(memberDir).length? Object.keys(memberDir).map(id=>+id) : Object.keys(per).map(id=>+id);
   const part=roster.map(id=>{
-    const p=per[id]||{n:0,last:0,roles:{}};
+    const p=per[id]||{n:0,last:0,roles:{},inDays:0,idle:days};
     const md=memberDir[id]||{};
     const newish = md.joined && md.joined>from;
     const role=Object.entries(p.roles).sort((a,b)=>b[1]-a[1])[0];
-    return {id, name:md.name||("["+id+"]"), n:p.n, last:p.last, now:inNow[id], newish, role:role?role[0]:null};
+    return {id, name:md.name||("["+id+"]"), n:p.n, last:p.last, now:inNow[id], newish, role:role?role[0]:null,
+            inDays:p.inDays||0, idle:(p.idle==null? days : p.idle)};
   }).sort((a,b)=> a.n-b.n || (b.last||0)-(a.last||0));
   const idle=part.filter(p=>!p.n && !p.now).length;
   $("ocPartMeta").textContent=`${part.length} members · ${idle} with nothing in this range`;
   $("octptblBody").innerHTML=part.map(p=>
     `<tr><td style="text-align:left" class="name">${esc(p.name)}${p.newish?' <span class="meta">(new)</span>':""}</td>`
     + `<td class="${p.n?"pos":"neg"}"><b>${p.n}</b></td>`
+    + `<td><span class="rec"><span class="w">${p.inDays}</span><span class="sl">/</span>`
+      + `<span class="l ${p.idle>days*0.5?"neg":p.idle>days*0.25?"warn":"zero"}">${p.idle}</span></span></td>`
     + `<td style="text-align:left" class="meta">${p.last? fmtDate(p.last)+" · "+ago(p.last) : "—"}</td>`
     + `<td style="text-align:left" class="${p.now?"pos":"zero"}">${p.now? esc(p.now.name)+" ("+p.now.status.toLowerCase()+")"
         + (p.now.pass!=null? ` <b class="${passCls(p.now.pass)}">${Math.round(p.now.pass)}%</b>`:"") : "—"}</td>`
@@ -2597,7 +2599,7 @@ for(const id of ["ocFrom","ocTo"]) $(id).onchange=()=>{
   cfg.ocFrom=$("ocFrom").value; cfg.ocTo=$("ocTo").value; save(LS.cfg,cfg); renderOC();
 };
 $("ocHideEx").onchange=()=>{ cfg.ocHideEx=$("ocHideEx").checked; save(LS.cfg,cfg); renderOC() };
-$("ocSmooth").onchange=()=>{ cfg.ocSmooth=+$("ocSmooth").value||14; save(LS.cfg,cfg); renderOC() };
+$("ocSmooth").onchange=()=>{ cfg.ocSmooth=+$("ocSmooth").value||30; save(LS.cfg,cfg); renderOC() };
 $("ocReset").onclick=()=>{ cfg.ocFrom=""; cfg.ocTo=""; save(LS.cfg,cfg); renderOC() };
 $("ocHead").addEventListener("click",e=>{
   const th=e.target.closest("th[data-k]"); if(!th) return;
