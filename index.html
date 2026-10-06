@@ -725,7 +725,7 @@ details.settings summary{cursor:pointer}
     <div class="meta" id="chainMeta"></div>
   </div>
   <div class="zoomrow">
-    <button id="chainLoad" class="primary">Load chains</button>
+    <button id="chainLoad">Reload chains</button>
     <span class="lbl">report the biggest</span>
     <select id="chainMax" style="padding:4px 8px">
       <option value="10">10 chains</option>
@@ -836,7 +836,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 16:19</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 16:30</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -878,7 +878,7 @@ details.settings summary{cursor:pointer}
 const LS = {
   cfg:"twl_cfg", war:"twl_war",
   atk:id=>"twl_atk_"+id, snap:id=>"twl_snap_"+id,
-  esnap:id=>"twl_esnap_"+id, med:id=>"twl_med_"+id, arm:id=>"twl_arm_"+id, cur:id=>"twl_cur_"+id,
+  esnap:id=>"twl_esnap_"+id, med:id=>"twl_med_"+id, arm:id=>"twl_arm_"+id, cur:id=>"twl_cur_"+id, chain:id=>"twl_chain_"+id,
   pts:id=>"twl_pts_"+id, ref:id=>"twl_ref_"+id
 };
 let cfg = load(LS.cfg) || {key:"", pAtk:120, pMem:60, medHits:3, medBurst:60, medGap:300};
@@ -1163,7 +1163,10 @@ function startTracking(){
   armoury = load(LS.arm(war.warId))||[]; armIds = new Set(armoury.map(a=>a.nid).filter(Boolean));
   ptsGiven = load(LS.pts(war.warId))||[]; ptsIds = new Set(ptsGiven.map(a=>a.nid).filter(Boolean));
   refills = load(LS.ref(war.warId))||[]; refillIds = new Set(refills.map(a=>a.nid).filter(Boolean));
+  const chCache=load(LS.chain(war.warId));
+  chainReports=(chCache&&chCache.reports)||{};
   chainData=null; renderChains();
+  loadChains(false);                               // cached reports make this one call
   newsCur = load(LS.cur(war.warId)) || {arm:0, pts:0};
 
   $("pAtk").value=cfg.pAtk; $("pMem").value=cfg.pMem;
@@ -2284,7 +2287,7 @@ function bindCharts(){
    part — non_attackers, the members who were in the faction and did not swing.
    One call per chain, so reports are capped and run on a button rather than
    with the rest of the war polling. */
-let chainData=null, chainSort={k:"inChains",dir:-1}, chainShowList=false;
+let chainData=null, chainReports={}, chainSort={k:"inChains",dir:-1}, chainShowList=false;
 const CH_COLS=[
   {k:"name",     label:"Member", left:true},
   {k:"inChains", label:"Chains in"},
@@ -2294,7 +2297,7 @@ const CH_COLS=[
   {k:"best",     label:"Best"},
   {k:"bonuses",  label:"Bonuses"}
 ];
-async function loadChains(){
+async function loadChains(force){
   if(!war) return;
   const btn=$("chainLoad"); btn.disabled=true; $("chainProg").textContent="listing chains…";
   try{
@@ -2302,12 +2305,16 @@ async function loadChains(){
     const r = await api("/faction/chains",{from:war.start, to, limit:100});
     const chains=(r.chains||[]).filter(c=>c.start>=war.start && c.start<=to).sort((a,b)=>b.chain-a.chain);
     const cap=Math.min(+$("chainMax").value||25, chains.length);
+    // reports are cached per war, so opening a war again costs one call, not 26
+    const have=force? {} : (chainReports||{});
     const per={}, reports=[];
     for(let i=0;i<cap;i++){
       $("chainProg").textContent=`report ${i+1} of ${cap}…`;
       try{
-        const rep=await api("/faction/chainreport",{id:chains[i].id});
-        const cr=rep.chainreport; if(!cr) continue;
+        let cr=have[chains[i].id];
+        if(!cr){ cr=(await api("/faction/chainreport",{id:chains[i].id})).chainreport; }
+        if(!cr) continue;
+        have[chains[i].id]=cr;
         reports.push({id:chains[i].id, chain:chains[i].chain, respect:chains[i].respect,
                       start:chains[i].start, end:chains[i].end, bonuses:cr.bonuses||[],
                       members:(cr.details&&cr.details.members) ?? (cr.attackers||[]).length,
@@ -2326,7 +2333,9 @@ async function loadChains(){
       }catch(e){ /* one bad report should not sink the batch */ }
     }
     for(const p of Object.values(per)) p.avg = p.hits? p.resp/p.hits : 0;
+    chainReports=have;
     chainData={chains, reports, per:Object.values(per), at:now(), cap};
+    save(LS.chain(war.warId), {reports:have, at:now()});
     $("chainProg").textContent="";
     renderChains();
   }catch(e){ $("chainProg").textContent=e.message }
@@ -2334,10 +2343,10 @@ async function loadChains(){
 }
 function renderChains(){
   if(!chainData){
-    $("chtblBody").innerHTML=`<tr><td colspan="7" class="meta">Press Load chains for this war.</td></tr>`;
+    $("chtblBody").innerHTML=`<tr><td colspan="7" class="meta">Loading chains…</td></tr>`;
     $("chainBigList").innerHTML=""; $("chainBigMeta").textContent="";
     $("chHead").innerHTML=""; $("chtblFoot").innerHTML=""; $("chainTiles").innerHTML=""; $("chainMeta").textContent="";
-    $("chainHint").textContent="Chain reports cost one call each, so they load on demand rather than with the rest of the war.";
+    $("chainHint").textContent="Chain reports cost one call each, so they are cached per war — opening this war again will not refetch them.";
     return;
   }
   const d=chainData;
@@ -2387,10 +2396,10 @@ function renderChains(){
       + `<div class="who">${who||"—"}</div></div>`;
   }).join("") : `<p class="meta">No chain over 25 in this war.</p>`;
   $("chainHint").innerHTML = `Chains over 25 are listed on the left with who swung in them and how many hits each landed; ★ marks the bonus hit. `
-    + `Only the biggest ${d.cap} chains are reported, since each costs an API call; short chains still count in the totals above. `
+    + `Only the biggest ${d.cap} chains are reported, since each costs an API call, and reports are cached per war so reopening it is free. `
     + `<b>Avg</b> is respect per hit, which is where you see who is picking the right targets during a chain.`;
 }
-$("chainLoad").onclick=loadChains;
+$("chainLoad").onclick=()=>loadChains(true);
 $("chainMax").onchange=()=>{ if(chainData) loadChains() };
 $("chHead").addEventListener("click",e=>{
   const th=e.target.closest("th[data-k]"); if(!th) return;
