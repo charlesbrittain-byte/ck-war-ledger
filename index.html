@@ -779,7 +779,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:49</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 11:12</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -1111,7 +1111,6 @@ function startTracking(){
   $("pAtk").value=cfg.pAtk; $("pMem").value=cfg.pMem;
   $("syncUrl").value=cfg.syncUrl||""; $("syncTok").value=cfg.syncTok||"";
   if(cfg.tlTall){ $("tlRows").classList.add("tl-tall"); $("tlTall").className="on" }
-  if(cfg.colsAll!==false){ document.body.classList.add("cols-all"); $("colsBtn").textContent="⤢ Fewer columns" }
   $("syncTest").checked = !!cfg.syncTest;
   $("syncByFac").checked = !!cfg.syncByFac;
   if(cfg.syncUrl){ fetchServerSnaps().then(c=>{ if(c) renderAll() }); fetchTerms().then(c=>{ if(c) renderAll() }) }
@@ -1326,6 +1325,10 @@ $("termsSet").onclick=()=>{
 };
 $("termsEditBtn").onclick=()=>{ $("termsEdit").hidden=false; $("termsSetView").hidden=true; renderScrubOnly() };
 $("termsFromMarker").onclick=()=>{ applyTerms(scrubT, "") };
+// phones show every column by default, whether or not a war is open
+(function initCols(){
+  if(cfg.colsAll!==false){ document.body.classList.add("cols-all"); $("colsBtn").textContent="⤢ Fewer columns" }
+})();
 $("colsBtn").onclick=()=>{
   const on=document.body.classList.toggle("cols-all");
   $("colsBtn").textContent = on? "⤢ Fewer columns" : "⤢ All columns";
