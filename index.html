@@ -167,7 +167,7 @@ td.name:hover{color:var(--amber)}
 .tl-name{width:130px; min-width:130px; text-align:right; font-size:13px; color:var(--dim); overflow:hidden; text-overflow:ellipsis}
 .tl-band{flex:1; height:16px; background:var(--panel2); position:relative; border-radius:2px; overflow:hidden}
 /* hit ticks live in their own half: made above the midline, taken below, never overlapping */
-.tl-band::after{content:""; position:absolute; left:0; right:0; top:50%; height:1px; margin-top:-0.5px; background:rgba(10,12,14,.55); z-index:1; pointer-events:none}
+#tlRows .tl-band::after{content:""; position:absolute; left:0; right:0; top:50%; height:1px; margin-top:-0.5px; background:rgba(10,12,14,.55); z-index:1; pointer-events:none}
 .tl-seg{position:absolute; top:0; bottom:0; z-index:0}
 .tl-tick{position:absolute; width:2px; z-index:2; box-shadow:0 0 0 1px rgba(10,12,14,.65)}
 .tl-tick.out{top:0; height:44%; background:var(--tick-out)}
@@ -697,6 +697,42 @@ details.settings summary{cursor:pointer}
   <p class="hint" id="armHint"></p>
 </section>
 
+<!-- CHAIN INVOLVEMENT -->
+<section id="chainCard" class="card" hidden>
+  <div class="scrubhead">
+    <h2 style="margin:0">Chains — who turned up</h2>
+    <div class="meta" id="chainMeta"></div>
+  </div>
+  <div class="zoomrow">
+    <button id="chainLoad" class="primary">Load chains</button>
+    <span class="lbl">report the biggest</span>
+    <select id="chainMax" style="padding:4px 8px">
+      <option value="10">10 chains</option>
+      <option value="25" selected>25 chains</option>
+      <option value="50">50 chains</option>
+    </select>
+    <span class="meta" id="chainProg"></span>
+  </div>
+  <div class="row" id="chainTiles" style="margin-top:12px; gap:20px"></div>
+  <div class="tblwrap" style="margin-top:12px">
+    <table id="chtbl" style="min-width:680px">
+      <thead><tr id="chHead"></tr></thead>
+      <tbody id="chtblBody"></tbody>
+      <tfoot><tr id="chtblFoot"></tr></tfoot>
+    </table>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button id="chainToggle">Show each chain</button>
+  </div>
+  <div class="tblwrap" id="chainListWrap" hidden style="margin-top:10px">
+    <table id="chltbl" style="min-width:560px">
+      <thead><tr><th>Chain</th><th>Respect</th><th>Members</th><th style="text-align:left">Started</th><th>Ran for</th><th style="text-align:left">Bonuses</th></tr></thead>
+      <tbody id="chltblBody"></tbody>
+    </table>
+  </div>
+  <p class="hint" id="chainHint"></p>
+</section>
+
 <!-- WAR PAYOUT -->
 <section id="payCard" class="card" hidden>
   <div class="scrubhead">
@@ -779,7 +815,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 15:48</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 16:05</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -1106,6 +1142,7 @@ function startTracking(){
   armoury = load(LS.arm(war.warId))||[]; armIds = new Set(armoury.map(a=>a.nid).filter(Boolean));
   ptsGiven = load(LS.pts(war.warId))||[]; ptsIds = new Set(ptsGiven.map(a=>a.nid).filter(Boolean));
   refills = load(LS.ref(war.warId))||[]; refillIds = new Set(refills.map(a=>a.nid).filter(Boolean));
+  chainData=null; renderChains();
   newsCur = load(LS.cur(war.warId)) || {arm:0, pts:0};
 
   $("pAtk").value=cfg.pAtk; $("pMem").value=cfg.pMem;
@@ -2219,6 +2256,122 @@ function bindCharts(){
   bindPinch($("armRows"), true);
 }
 
+/* ---------- chain involvement ----------
+   /faction/chains lists the chains in a window; /faction/chainreport gives each
+   one's attackers with their hits and respect, the bonus hits, and — the useful
+   part — non_attackers, the members who were in the faction and did not swing.
+   One call per chain, so reports are capped and run on a button rather than
+   with the rest of the war polling. */
+let chainData=null, chainSort={k:"inChains",dir:-1}, chainShowList=false;
+const CH_COLS=[
+  {k:"name",     label:"Member", left:true},
+  {k:"inChains", label:"Chains in"},
+  {k:"missed",   label:"Sat out"},
+  {k:"hits",     label:"Hits"},
+  {k:"resp",     label:"Respect"},
+  {k:"avg",      label:"Avg"},
+  {k:"best",     label:"Best"},
+  {k:"bonuses",  label:"Bonuses"}
+];
+async function loadChains(){
+  if(!war) return;
+  const btn=$("chainLoad"); btn.disabled=true; $("chainProg").textContent="listing chains…";
+  try{
+    const to = war.end && war.end<now()? war.end+300 : now();
+    const r = await api("/faction/chains",{from:war.start, to, limit:100});
+    const chains=(r.chains||[]).filter(c=>c.start>=war.start && c.start<=to).sort((a,b)=>b.chain-a.chain);
+    const cap=Math.min(+$("chainMax").value||25, chains.length);
+    const per={}, reports=[];
+    for(let i=0;i<cap;i++){
+      $("chainProg").textContent=`report ${i+1} of ${cap}…`;
+      try{
+        const rep=await api("/faction/chainreport",{id:chains[i].id});
+        const cr=rep.chainreport; if(!cr) continue;
+        reports.push({id:chains[i].id, chain:chains[i].chain, respect:chains[i].respect,
+                      start:chains[i].start, end:chains[i].end, bonuses:cr.bonuses||[],
+                      members:(cr.details&&cr.details.members) ?? (cr.attackers||[]).length});
+        const get=id=>per[id]||(per[id]={id, name:(memberDir[id]&&memberDir[id].name)||("["+id+"]"),
+          inChains:0, missed:0, hits:0, resp:0, best:0, bonuses:0});
+        for(const a of (cr.attackers||[])){
+          const p=get(a.id); p.inChains++;
+          p.hits += (a.attacks&&a.attacks.total)||0;
+          p.resp += (a.respect&&a.respect.total)||0;
+          p.best = Math.max(p.best, (a.respect&&a.respect.best)||0);
+          p.bonuses += (a.attacks&&a.attacks.bonuses)||0;
+        }
+        for(const id of (cr.non_attackers||[])) get(id).missed++;
+      }catch(e){ /* one bad report should not sink the batch */ }
+    }
+    for(const p of Object.values(per)) p.avg = p.hits? p.resp/p.hits : 0;
+    chainData={chains, reports, per:Object.values(per), at:now(), cap};
+    $("chainProg").textContent="";
+    renderChains();
+  }catch(e){ $("chainProg").textContent=e.message }
+  finally{ btn.disabled=false }
+}
+function renderChains(){
+  if(!chainData){
+    $("chtblBody").innerHTML=`<tr><td colspan="8" class="meta">Press Load chains for this war.</td></tr>`;
+    $("chHead").innerHTML=""; $("chtblFoot").innerHTML=""; $("chainTiles").innerHTML=""; $("chainMeta").textContent="";
+    $("chainHint").textContent="Chain reports cost one call each, so they load on demand rather than with the rest of the war.";
+    return;
+  }
+  const d=chainData;
+  const best=d.chains.reduce((m,c)=>Math.max(m,c.chain),0);
+  const respect=d.chains.reduce((x,c)=>x+(c.respect||0),0);
+  const bonusHits=d.reports.reduce((x,r)=>x+r.bonuses.length,0);
+  $("chainMeta").textContent=`${d.chains.length} chains in this war · ${d.reports.length} reported · loaded ${ago(d.at)}`;
+  $("chainTiles").innerHTML=
+      `<div class="octile"><b>${d.chains.length}</b><span>chains</span></div>`
+    + `<div class="octile"><b class="pos">${best}</b><span>longest chain</span></div>`
+    + `<div class="octile"><b style="color:var(--amber)">${fmtR(respect)}</b><span>chain respect</span></div>`
+    + `<div class="octile"><b>${bonusHits}</b><span>bonus hits</span></div>`;
+  $("chHead").innerHTML=CH_COLS.map(c=>
+    `<th data-k="${c.k}" class="ch-${c.k}${chainSort.k===c.k?" sorted":""}" style="${c.left?"text-align:left":""}">${c.label}</th>`).join("");
+  const rows=[...d.per].sort((a,b)=>{
+    const va=a[chainSort.k]??0, vb=b[chainSort.k]??0;
+    return (typeof va==="string"? va.localeCompare(vb) : va-vb)*chainSort.dir;
+  });
+  $("chtblBody").innerHTML = rows.length? rows.map(r=>{
+    const shown=r.inChains+r.missed;
+    const turnout=shown? r.inChains/shown : 0;
+    return `<tr><td style="text-align:left" class="name ch-name">${esc(r.name)}</td>`
+      + `<td class="ch-inChains ${turnout>=0.5?"pos":turnout>0?"warn":"neg"}"><b>${r.inChains}</b></td>`
+      + `<td class="ch-missed ${r.missed?"neg":"zero"}">${r.missed||"–"}</td>`
+      + `<td class="ch-hits">${r.hits||"–"}</td>`
+      + `<td class="ch-resp" style="${r.resp?"color:var(--amber)":""}">${r.resp? fmtR(r.resp):"–"}</td>`
+      + `<td class="ch-avg">${r.avg? r.avg.toFixed(2):"–"}</td>`
+      + `<td class="ch-best">${r.best? fmtR(r.best):"–"}</td>`
+      + `<td class="ch-bonuses ${r.bonuses?"pos":"zero"}">${r.bonuses||"–"}</td></tr>`;
+  }).join("") : `<tr><td colspan="8" class="meta">No chain reports in this war.</td></tr>`;
+  const S=k=>rows.reduce((x,r)=>x+(r[k]||0),0);
+  $("chtblFoot").innerHTML=`<td style="text-align:left" class="ch-name">Total</td><td class="ch-inChains"></td>`
+    + `<td class="ch-missed"></td><td class="ch-hits">${S("hits")}</td>`
+    + `<td class="ch-resp" style="color:var(--amber)">${fmtR(S("resp"))}</td><td class="ch-avg"></td><td class="ch-best"></td>`
+    + `<td class="ch-bonuses">${S("bonuses")}</td>`;
+  $("chainListWrap").hidden=!chainShowList;
+  $("chainToggle").textContent = chainShowList? "Hide the chains" : "Show each chain";
+  if(chainShowList) $("chltblBody").innerHTML = d.reports.map(r=>{
+    const mins=Math.max(1,Math.round((r.end-r.start)/60));
+    const bon=r.bonuses.map(b=>`${b.chain} (${(memberDir[b.attacker_id]&&memberDir[b.attacker_id].name)||b.attacker_id})`).join(", ");
+    return `<tr><td><b>${r.chain}</b></td><td style="color:var(--amber)">${fmtR(r.respect)}</td>`
+      + `<td>${r.members??"–"}</td><td style="text-align:left" class="meta">${fmtDT(r.start)}</td>`
+      + `<td class="meta">${mins}m</td><td style="text-align:left" class="meta">${esc(bon)||"–"}</td></tr>`;
+  }).join("") || `<tr><td colspan="6" class="meta">Nothing reported.</td></tr>`;
+  $("chainHint").innerHTML = `<b>Sat out</b> counts chains where someone was in the faction and did not swing — Torn reports that directly, `
+    + `so it is not inferred. Only the biggest ${d.cap} chains are reported, since each costs an API call; short chains are in the totals above but not the table. `
+    + `<b>Avg</b> is respect per hit, which is where you see who is picking the right targets during a chain.`;
+}
+$("chainLoad").onclick=loadChains;
+$("chainMax").onchange=()=>{ if(chainData) loadChains() };
+$("chainToggle").onclick=()=>{ chainShowList=!chainShowList; renderChains() };
+$("chHead").addEventListener("click",e=>{
+  const th=e.target.closest("th[data-k]"); if(!th) return;
+  const k=th.dataset.k;
+  chainSort = chainSort.k===k? {k, dir:-chainSort.dir} : {k, dir: k==="name"? 1 : -1};
+  renderChains();
+});
+
 /* ---------- war payout ----------
    Two ways leadership actually pays: a set rate per hit, or a pot split by
    effort. Both use the same weighting — a pre-terms hit is the hard one, and
@@ -2304,7 +2457,7 @@ $("payCsv").onclick=()=>{
 };
 
 /* ---------- dashboard tabs ---------- */
-const WAR_CARDS=["scrubCard","tableCard","tlCard","medCard","armCard","payCard","qualityCard"];
+const WAR_CARDS=["scrubCard","tableCard","tlCard","medCard","armCard","chainCard","payCard","qualityCard"];
 const TABS={ faction:["facCard","homeArmCard"], war:["homeCard","warpick"], oc:["ocCard","ocPartCard","ocTypeCard"] };
 let dashTab = "faction";
 function showTab(t){
