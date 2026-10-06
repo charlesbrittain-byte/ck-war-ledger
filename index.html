@@ -438,6 +438,8 @@ details.settings summary{cursor:pointer}
     <input type="date" id="ocTo">
     <button id="ocReset" title="Back to the last 90 days">90d</button>
     <span class="gap"></span>
+    <label class="inl"><input type="checkbox" id="ocHideEx" style="width:auto" checked> hide former members</label>
+    <span class="gap"></span>
     <span class="lbl">Smooth</span>
     <select id="ocSmooth" style="padding:4px 8px">
       <option value="1">off</option>
@@ -480,7 +482,7 @@ details.settings summary{cursor:pointer}
       <tbody id="octptblBody"></tbody>
     </table>
   </div>
-  <p class="hint">Everyone on the roster, slackers first. "In one now" counts crimes still recruiting or planning, so someone who has joined the next one is not chased for the last one. Members who joined the faction inside the window are marked, since they cannot have joined crimes that ran before they arrived. The percentage beside a current crime is their chance in that slot — green at 65 and over, amber to 55, red below — so a bad fit can be swapped before it runs.</p>
+  <p class="hint">Everyone on the roster, slackers first. "In one now" counts crimes still recruiting or planning, so someone who has joined the next one is not chased for the last one. Members who joined the faction inside the window are marked, since they cannot have joined crimes that ran before they arrived. The percentage beside a current crime is their pass rate in that slot — green at 65 and over, amber to 55, red below — so a bad fit can be swapped before it runs.</p>
 </section>
 
 <!-- OC BY CRIME -->
@@ -742,7 +744,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:10</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:17</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -754,7 +756,7 @@ details.settings summary{cursor:pointer}
     <div class="row" id="ocmTiles" style="margin:10px 0; gap:18px"></div>
     <div class="tblwrap">
       <table id="ocmtbl" style="min-width:560px">
-        <thead><tr><th style="text-align:left">Crime</th><th>Level</th><th>Chance</th><th style="text-align:left">Ran</th><th style="text-align:left">Role</th><th style="text-align:left">Result</th><th>Payout</th></tr></thead>
+        <thead><tr><th style="text-align:left">Crime</th><th>Level</th><th>Pass rate</th><th style="text-align:left">Ran</th><th style="text-align:left">Role</th><th style="text-align:left">Result</th><th>Payout</th></tr></thead>
         <tbody id="ocmtblBody"></tbody>
       </table>
     </div>
@@ -2291,7 +2293,7 @@ const OC_COLS=[
   {k:"name",   label:"Member", left:true},
   {k:"n",      label:"Crimes"},
   {k:"rate",   label:"Won / lost"},
-  {k:"pass",   label:"Avg chance"},
+  {k:"pass",   label:"Pass rate"},
   {k:"inDays", label:"Days in"},
   {k:"idle",   label:"Days idle"},
   {k:"resp",   label:"Respect"},
@@ -2419,6 +2421,7 @@ function renderOC(){
   const rg=ocRange();
   $("ocFrom").value=dayStr(rg.from); $("ocTo").value=dayStr(rg.to);
   $("ocSmooth").value=String(cfg.ocSmooth||14);
+  $("ocHideEx").checked = cfg.ocHideEx!==false;
   if(!ocRaw){
     $("octblBody").innerHTML=`<tr><td colspan="7" class="meta">Loading…</td></tr>`;
     $("ocHead").innerHTML=""; $("octblFoot").innerHTML=""; $("ocTotals").innerHTML=""; $("ocMeta").textContent="";
@@ -2468,8 +2471,13 @@ function renderOC(){
 
   $("ocHead").innerHTML=OC_COLS.map(c=>
     `<th data-k="${c.k}" class="${ocSort.k===c.k?"sorted":""}" style="${c.left?"text-align:left":""}">${c.label}</th>`).join("");
-  for(const p of Object.values(per)){ p.inDays=p.days.size; p.idle=Math.max(0, days-p.inDays); p.pass=p.passN? p.passSum/p.passN : null }
-  const rows=Object.values(per).sort((a,b)=>{
+  for(const p of Object.values(per)){
+    p.inDays=p.days.size; p.idle=Math.max(0, days-p.inDays); p.pass=p.passN? p.passSum/p.passN : null;
+    p.ex = !memberDir[p.id];                     // no longer on the roster
+  }
+  const hideEx = $("ocHideEx").checked;
+  const exCount = Object.values(per).filter(p=>p.ex).length;
+  const rows=Object.values(per).filter(p=>!(hideEx&&p.ex)).sort((a,b)=>{
     if(ocSort.k==="rate"){ const ra=a.n?a.ok/a.n:0, rb=b.n?b.ok/b.n:0; return (ra-rb)*ocSort.dir }
     const va=a[ocSort.k]??0, vb=b[ocSort.k]??0;
     return (typeof va==="string"? va.localeCompare(vb) : va-vb)*ocSort.dir;
@@ -2497,7 +2505,9 @@ function renderOC(){
     + `<td></td><td></td>`
     + `<td style="color:var(--amber)">${fmtNum(S("resp"))}</td><td class="pos"><b>${fmtCash(S("pay"))}</b></td>`;
   ocPer=per;
-  $("ocHint").innerHTML = `Completed crimes only. <b>Click a name</b> for every crime they joined, with its level — useful when someone's fail rate looks off. `
+  $("ocHint").innerHTML = (exCount? `<b>${exCount} former member${exCount>1?"s":""} ${hideEx?"hidden":"shown"}</b> — they are in the crime history but have left the faction, so they show as a bare id. ` : "")
+    + `Completed crimes only. <b>Pass rate</b> is the checkpoint pass rate on their slots, averaged — green at 65 and over, amber to 55, red below. `
+    + `<b>Click a name</b> for every crime they joined, with its level — useful when someone's fail rate looks off. `
     + `<b>Days idle</b> is days in this range they were in no crime at all, waiting or running; that is the number to chase. `
     + `<b>Payout share</b> is the money at the percentage leadership actually paid, split across the filled slots. `
     + `Respect per member is each crime's respect over its team, so that column can total a point or two off the headline. Sort any column; hover a name for the roles they filled.`;
@@ -2555,7 +2565,7 @@ function openOcMember(id){
       `<div class="octile"><b>${r.n}</b><span>crimes joined</span></div>`
     + `<div class="octile"><b class="${pct>=70?"pos":pct>=50?"":"neg"}">${pct}%</b><span>${r.ok} won · ${r.fail} lost</span></div>`
     + `<div class="octile"><b>${r.inDays}<span class="meta" style="font-size:13px"> / ${r.inDays+r.idle}</span></b><span>days in a crime</span></div>`
-    + `<div class="octile"><b class="${passCls(r.pass)}">${r.pass==null? "–" : Math.round(r.pass)+"%"}</b><span>average chance</span></div>`
+    + `<div class="octile"><b class="${passCls(r.pass)}">${r.pass==null? "–" : Math.round(r.pass)+"%"}</b><span>average pass rate</span></div>`
     + `<div class="octile"><b class="pos">${fmtCash(r.pay)}</b><span>payout share</span></div>`;
   $("ocmtblBody").innerHTML = [...r.list].sort((a,b)=>b.t-a.t).map(c=>
       `<tr><td style="text-align:left">${esc(c.name)}</td>`
@@ -2586,6 +2596,7 @@ $("ocLoad").onclick=loadOC;
 for(const id of ["ocFrom","ocTo"]) $(id).onchange=()=>{
   cfg.ocFrom=$("ocFrom").value; cfg.ocTo=$("ocTo").value; save(LS.cfg,cfg); renderOC();
 };
+$("ocHideEx").onchange=()=>{ cfg.ocHideEx=$("ocHideEx").checked; save(LS.cfg,cfg); renderOC() };
 $("ocSmooth").onchange=()=>{ cfg.ocSmooth=+$("ocSmooth").value||14; save(LS.cfg,cfg); renderOC() };
 $("ocReset").onclick=()=>{ cfg.ocFrom=""; cfg.ocTo=""; save(LS.cfg,cfg); renderOC() };
 $("ocHead").addEventListener("click",e=>{
