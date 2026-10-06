@@ -109,6 +109,23 @@ label.inl{color:var(--dim); font-size:14px; display:flex; align-items:center; ga
 .tabs button{padding:8px 16px; font-size:15px; font-weight:600; border-radius:8px 8px 0 0; color:var(--dim)}
 .tabs button.on{background:var(--panel); border-color:var(--line); border-bottom-color:var(--panel); color:var(--text)}
 .tabs button.on::before{content:""; display:inline-block; width:3px; height:13px; background:var(--amber); border-radius:2px; margin-right:7px; vertical-align:-2px}
+.zwrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
+/* names stay put while the strip scrolls, or you lose track of whose row is whose */
+.zwrap .tl-name{position:sticky; left:0; z-index:5; background:var(--panel); padding-right:4px}
+.zwrap .tl-axis .tl-name{background:var(--panel)}
+.zinner{width:100%}
+.zbar{position:relative; height:8px; margin-top:6px; background:#15181C; border:1px solid var(--line); border-radius:999px}
+.zbar-thumb{position:absolute; top:1px; bottom:1px; background:var(--amber); border-radius:999px; opacity:.85}
+.zbar-lbl{position:absolute; right:4px; top:-16px; font-size:11px; color:var(--faint)}
+.twocol{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr); gap:16px; margin-top:12px; align-items:start}
+.subhead{font-size:12px; font-weight:700; color:var(--faint); letter-spacing:.07em; text-transform:uppercase; margin-bottom:8px}
+.subhead .meta{font-weight:400; letter-spacing:0; text-transform:none}
+.bigchain{background:#181C21; border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin-bottom:7px}
+.bigchain .top{display:flex; align-items:baseline; gap:8px}
+.bigchain .n{font-size:21px; font-weight:700; color:var(--up)}
+.bigchain .who{color:var(--dim); font-size:13.5px; margin-top:4px; line-height:1.4}
+.bigchain .who b{color:var(--text); font-weight:600}
+@media (max-width:760px){ .twocol{grid-template-columns:minmax(0,1fr)} }
 .octile{display:flex; flex-direction:column; gap:1px}
 .octile b{font-size:20px; font-weight:700}
 .occhart{width:100%; height:150px; display:block; margin-top:12px}
@@ -436,7 +453,8 @@ details.settings summary{cursor:pointer}
     <button id="homeArmLoad" class="primary">Load</button>
     <span class="meta" id="homeArmProg"></span>
   </div>
-  <div id="homeArmRows" style="margin-top:10px"></div>
+  <div class="zwrap" id="homeArmZoom" style="margin-top:10px"><div class="zinner" id="homeArmRows"></div></div>
+  <div class="zbar" id="homeArmBar" hidden></div>
   <div class="legend">
     <span><i style="background:var(--it-xan);height:10px;width:3px"></i>xanax</span>
     <span><i style="background:var(--it-sfak);height:10px;width:3px"></i>small first aid kit</span>
@@ -457,7 +475,7 @@ details.settings summary{cursor:pointer}
       <tfoot><tr id="hatblFoot"></tr></tfoot>
     </table>
   </div>
-  <p class="hint">Faction armoury only — items someone bought themselves never appear. Pinch to zoom in and drag to slide along, so you can see who did what and when. Weekends are shaded, so a training weekend shows up as a burst of xanax against the grey. Each tick is the exact minute an item was taken; hover one to see what it was.</p>
+  <p class="hint">Faction armoury only — items someone bought themselves never appear. Pinch to zoom (or ⌘/Ctrl + scroll, or double-click to reset) and the bar underneath shows where you are; the dates stay as they are. Weekends are shaded, so a training weekend shows up as a burst of xanax against the grey. Each tick is the exact minute an item was taken; hover one to see what it was.</p>
 </section>
 
 <!-- ORGANISED CRIME -->
@@ -489,7 +507,8 @@ details.settings summary{cursor:pointer}
   <div class="row" id="ocTrend" style="margin-top:10px; gap:18px"></div>
   <p class="meta" id="ocTrendNote" style="margin-top:4px"></p>
   <div class="row" id="ocTotals" style="margin-top:12px; gap:20px"></div>
-  <svg id="ocChart" class="occhart" preserveAspectRatio="none"></svg>
+  <div class="zwrap" id="ocChartZoom"><div class="zinner" id="ocChartInner"><svg id="ocChart" class="occhart" preserveAspectRatio="none"></svg></div></div>
+  <div class="zbar" id="ocChartBar" hidden></div>
   <div class="legend" id="ocChartLegend" hidden>
     <span><i style="background:var(--up)"></i>money per day</span>
     <span><i style="background:var(--amber)"></i>respect per day</span>
@@ -620,7 +639,8 @@ details.settings summary{cursor:pointer}
     <span class="gap"></span>
     <button id="tlTall" title="Taller rows, easier to read">Taller rows</button>
   </div>
-  <div id="tlRows"></div>
+  <div class="zwrap" id="tlZoom"><div class="zinner" id="tlRows"></div></div>
+  <div class="zbar" id="tlBar" hidden></div>
   <div class="legend">
     <span><i style="background:var(--tl-ok)"></i>okay / attackable</span>
     <span><i style="background:var(--tl-ehosp)"></i>hospitalised by enemy</span>
@@ -672,7 +692,8 @@ details.settings summary{cursor:pointer}
     <h2 style="margin:0">Armoury usage — who took what, and when</h2>
     <div class="meta" id="armMeta"></div>
   </div>
-  <div id="armRows"></div>
+  <div class="zwrap" id="armZoom"><div class="zinner" id="armRows"></div></div>
+  <div class="zbar" id="armBar" hidden></div>
   <div class="legend">
     <span><i style="background:var(--it-xan);height:10px;width:3px"></i>xanax</span>
     <span><i style="background:var(--it-sfak);height:10px;width:3px"></i>small first aid kit</span>
@@ -714,21 +735,21 @@ details.settings summary{cursor:pointer}
     <span class="meta" id="chainProg"></span>
   </div>
   <div class="row" id="chainTiles" style="margin-top:12px; gap:20px"></div>
-  <div class="tblwrap" style="margin-top:12px">
-    <table id="chtbl" style="min-width:680px">
-      <thead><tr id="chHead"></tr></thead>
-      <tbody id="chtblBody"></tbody>
-      <tfoot><tr id="chtblFoot"></tr></tfoot>
-    </table>
-  </div>
-  <div class="row" style="margin-top:10px">
-    <button id="chainToggle">Show each chain</button>
-  </div>
-  <div class="tblwrap" id="chainListWrap" hidden style="margin-top:10px">
-    <table id="chltbl" style="min-width:560px">
-      <thead><tr><th>Chain</th><th>Respect</th><th>Members</th><th style="text-align:left">Started</th><th>Ran for</th><th style="text-align:left">Bonuses</th></tr></thead>
-      <tbody id="chltblBody"></tbody>
-    </table>
+  <div class="twocol">
+    <div>
+      <h3 class="subhead">Big chains <span class="meta" id="chainBigMeta"></span></h3>
+      <div id="chainBigList"></div>
+    </div>
+    <div>
+      <h3 class="subhead">Per member</h3>
+      <div class="tblwrap">
+        <table id="chtbl">
+          <thead><tr id="chHead"></tr></thead>
+          <tbody id="chtblBody"></tbody>
+          <tfoot><tr id="chtblFoot"></tr></tfoot>
+        </table>
+      </div>
+    </div>
   </div>
   <p class="hint" id="chainHint"></p>
 </section>
@@ -815,7 +836,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 16:05</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 16:19</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2169,6 +2190,7 @@ function renderHomeArm(fast){
       }).join("")
     : `<p class="meta">Nothing taken from the armoury in this period.</p>`;
   $("homeArmMeta").textContent=`${fmtDate(from)} → ${fmtDate(to)} · ${evs.length} event${evs.length===1?"":"s"} · loaded ${ago(homeArm.at)}`;
+  ZOOMS.get("homeArm")?.redraw();
   if(fast) return;                                   // mid-pinch: skip the table
   $("haHead").innerHTML=HARM_COLS.map(c=>
     `<th data-k="${c.k}" class="a-${c.k}${haSort.k===c.k?" sorted":""}" style="${c.left?"text-align:left":""}">${c.label}</th>`).join("");
@@ -2252,8 +2274,8 @@ function bindPinch(el, allowPan){
 }
 function bindCharts(){
   bindPinch($("spark").parentElement, false);   // single finger already drags the marker here
-  bindPinch($("tlRows"), true);
-  bindPinch($("armRows"), true);
+  makeZoomable("turtle", $("tlZoom"), $("tlRows"), $("tlBar"));
+  makeZoomable("warArm", $("armZoom"), $("armRows"), $("armBar"));
 }
 
 /* ---------- chain involvement ----------
@@ -2266,7 +2288,6 @@ let chainData=null, chainSort={k:"inChains",dir:-1}, chainShowList=false;
 const CH_COLS=[
   {k:"name",     label:"Member", left:true},
   {k:"inChains", label:"Chains in"},
-  {k:"missed",   label:"Sat out"},
   {k:"hits",     label:"Hits"},
   {k:"resp",     label:"Respect"},
   {k:"avg",      label:"Avg"},
@@ -2289,7 +2310,9 @@ async function loadChains(){
         const cr=rep.chainreport; if(!cr) continue;
         reports.push({id:chains[i].id, chain:chains[i].chain, respect:chains[i].respect,
                       start:chains[i].start, end:chains[i].end, bonuses:cr.bonuses||[],
-                      members:(cr.details&&cr.details.members) ?? (cr.attackers||[]).length});
+                      members:(cr.details&&cr.details.members) ?? (cr.attackers||[]).length,
+                      who:(cr.attackers||[]).map(a=>({id:a.id, hits:(a.attacks&&a.attacks.total)||0,
+                                                      resp:(a.respect&&a.respect.total)||0}))});
         const get=id=>per[id]||(per[id]={id, name:(memberDir[id]&&memberDir[id].name)||("["+id+"]"),
           inChains:0, missed:0, hits:0, resp:0, best:0, bonuses:0});
         for(const a of (cr.attackers||[])){
@@ -2311,7 +2334,8 @@ async function loadChains(){
 }
 function renderChains(){
   if(!chainData){
-    $("chtblBody").innerHTML=`<tr><td colspan="8" class="meta">Press Load chains for this war.</td></tr>`;
+    $("chtblBody").innerHTML=`<tr><td colspan="7" class="meta">Press Load chains for this war.</td></tr>`;
+    $("chainBigList").innerHTML=""; $("chainBigMeta").textContent="";
     $("chHead").innerHTML=""; $("chtblFoot").innerHTML=""; $("chainTiles").innerHTML=""; $("chainMeta").textContent="";
     $("chainHint").textContent="Chain reports cost one call each, so they load on demand rather than with the rest of the war.";
     return;
@@ -2337,34 +2361,37 @@ function renderChains(){
     const turnout=shown? r.inChains/shown : 0;
     return `<tr><td style="text-align:left" class="name ch-name">${esc(r.name)}</td>`
       + `<td class="ch-inChains ${turnout>=0.5?"pos":turnout>0?"warn":"neg"}"><b>${r.inChains}</b></td>`
-      + `<td class="ch-missed ${r.missed?"neg":"zero"}">${r.missed||"–"}</td>`
       + `<td class="ch-hits">${r.hits||"–"}</td>`
       + `<td class="ch-resp" style="${r.resp?"color:var(--amber)":""}">${r.resp? fmtR(r.resp):"–"}</td>`
       + `<td class="ch-avg">${r.avg? r.avg.toFixed(2):"–"}</td>`
       + `<td class="ch-best">${r.best? fmtR(r.best):"–"}</td>`
       + `<td class="ch-bonuses ${r.bonuses?"pos":"zero"}">${r.bonuses||"–"}</td></tr>`;
-  }).join("") : `<tr><td colspan="8" class="meta">No chain reports in this war.</td></tr>`;
+  }).join("") : `<tr><td colspan="7" class="meta">No chain reports in this war.</td></tr>`;
   const S=k=>rows.reduce((x,r)=>x+(r[k]||0),0);
   $("chtblFoot").innerHTML=`<td style="text-align:left" class="ch-name">Total</td><td class="ch-inChains"></td>`
-    + `<td class="ch-missed"></td><td class="ch-hits">${S("hits")}</td>`
+    + `<td class="ch-hits">${S("hits")}</td>`
     + `<td class="ch-resp" style="color:var(--amber)">${fmtR(S("resp"))}</td><td class="ch-avg"></td><td class="ch-best"></td>`
     + `<td class="ch-bonuses">${S("bonuses")}</td>`;
-  $("chainListWrap").hidden=!chainShowList;
-  $("chainToggle").textContent = chainShowList? "Hide the chains" : "Show each chain";
-  if(chainShowList) $("chltblBody").innerHTML = d.reports.map(r=>{
+  const big=d.reports.filter(r=>r.chain>=25).sort((a,b)=>b.chain-a.chain);
+  $("chainBigMeta").textContent = big.length? `· ${big.length} over 25` : "· none over 25";
+  $("chainBigList").innerHTML = big.length? big.map(r=>{
     const mins=Math.max(1,Math.round((r.end-r.start)/60));
-    const bon=r.bonuses.map(b=>`${b.chain} (${(memberDir[b.attacker_id]&&memberDir[b.attacker_id].name)||b.attacker_id})`).join(", ");
-    return `<tr><td><b>${r.chain}</b></td><td style="color:var(--amber)">${fmtR(r.respect)}</td>`
-      + `<td>${r.members??"–"}</td><td style="text-align:left" class="meta">${fmtDT(r.start)}</td>`
-      + `<td class="meta">${mins}m</td><td style="text-align:left" class="meta">${esc(bon)||"–"}</td></tr>`;
-  }).join("") || `<tr><td colspan="6" class="meta">Nothing reported.</td></tr>`;
-  $("chainHint").innerHTML = `<b>Sat out</b> counts chains where someone was in the faction and did not swing — Torn reports that directly, `
-    + `so it is not inferred. Only the biggest ${d.cap} chains are reported, since each costs an API call; short chains are in the totals above but not the table. `
+    const bonusBy=new Set(r.bonuses.map(b=>b.attacker_id));
+    const who=(r.who||[]).slice().sort((a,b)=>b.hits-a.hits).map(a=>{
+      const nm=(memberDir[a.id]&&memberDir[a.id].name)||("["+a.id+"]");
+      return `<b>${esc(nm)}</b> ${a.hits}${bonusBy.has(a.id)? ' <span style="color:var(--amber)">★</span>':""}`;
+    }).join(" · ");
+    return `<div class="bigchain"><div class="top"><span class="n">${r.chain}</span>`
+      + `<span style="color:var(--amber)">${fmtR(r.respect)}</span>`
+      + `<span class="meta">${fmtDT(r.start)} · ${mins}m · ${r.members??(r.who||[]).length} in</span></div>`
+      + `<div class="who">${who||"—"}</div></div>`;
+  }).join("") : `<p class="meta">No chain over 25 in this war.</p>`;
+  $("chainHint").innerHTML = `Chains over 25 are listed on the left with who swung in them and how many hits each landed; ★ marks the bonus hit. `
+    + `Only the biggest ${d.cap} chains are reported, since each costs an API call; short chains still count in the totals above. `
     + `<b>Avg</b> is respect per hit, which is where you see who is picking the right targets during a chain.`;
 }
 $("chainLoad").onclick=loadChains;
 $("chainMax").onchange=()=>{ if(chainData) loadChains() };
-$("chainToggle").onclick=()=>{ chainShowList=!chainShowList; renderChains() };
 $("chHead").addEventListener("click",e=>{
   const th=e.target.closest("th[data-k]"); if(!th) return;
   const k=th.dataset.k;
@@ -2480,6 +2507,64 @@ function showTab(t){
 }
 $("dashTabs").addEventListener("click",e=>{ const b=e.target.closest("button[data-tab]"); if(b) showTab(b.dataset.tab) });
 
+/* ---------- zoomable strips ----------
+   Zoom magnifies what is already drawn rather than changing the dates it covers:
+   the content keeps its full range and simply gets wider, the container scrolls,
+   and a bar underneath shows which slice you are looking at. Same behaviour with
+   a pinch, a trackpad and a mouse, so the desktop gets it too. */
+const ZOOMS=new Map();
+function makeZoomable(id, scrollEl, contentEl, barEl){
+  if(!scrollEl||!contentEl) return;
+  let z=ZOOMS.get(id)?.z || 1;
+  const state={z, scrollEl, contentEl, barEl};
+  ZOOMS.set(id,state);
+  const MAXZ=40;
+  const apply=(nz, anchorClientX)=>{
+    const prev=state.z;
+    nz=Math.min(MAXZ, Math.max(1, nz));
+    if(nz===prev) return;
+    const r=scrollEl.getBoundingClientRect();
+    const ax=(anchorClientX==null? r.width/2 : anchorClientX-r.left);
+    const atContent=(scrollEl.scrollLeft+ax)/prev;        // point under the finger, unzoomed
+    state.z=nz;
+    contentEl.style.width=(nz*100)+"%";
+    scrollEl.scrollLeft=atContent*nz-ax;
+    drawBar();
+  };
+  const drawBar=()=>{
+    if(!barEl) return;
+    const total=scrollEl.scrollWidth||1, view=scrollEl.clientWidth||1;
+    if(state.z<=1.001){ barEl.hidden=true; return }
+    barEl.hidden=false;
+    const w=Math.max(6, 100*view/total), l=100*scrollEl.scrollLeft/total;
+    barEl.innerHTML=`<div class="zbar-thumb" style="left:${l.toFixed(2)}%;width:${w.toFixed(2)}%"></div>`
+      + `<div class="zbar-lbl">${state.z.toFixed(1)}×</div>`;
+  };
+  state.redraw=()=>{ contentEl.style.width=(state.z*100)+"%"; drawBar() };
+  if(scrollEl.dataset.zoomable){ state.redraw(); return }
+  scrollEl.dataset.zoomable="1";
+  scrollEl.style.overflowX="auto";
+  scrollEl.style.touchAction="pan-x pan-y";               // one finger scrolls natively
+  scrollEl.addEventListener("scroll", drawBar, {passive:true});
+  let d0=0, z0=1, mid0=0;
+  const dist=t=>Math.abs(t[0].clientX-t[1].clientX);
+  const mid =t=>(t[0].clientX+t[1].clientX)/2;
+  scrollEl.addEventListener("touchstart",e=>{
+    if(e.touches.length===2){ d0=dist(e.touches)||1; z0=state.z; mid0=mid(e.touches); e.preventDefault() }
+  },{passive:false});
+  scrollEl.addEventListener("touchmove",e=>{
+    if(e.touches.length===2){ e.preventDefault(); apply(z0*(dist(e.touches)/d0), mid(e.touches)) }
+  },{passive:false});
+  scrollEl.addEventListener("wheel",e=>{
+    if(!(e.ctrlKey||e.metaKey)) return;
+    e.preventDefault();
+    apply(state.z*(e.deltaY>0? 0.85 : 1.18), e.clientX);
+  },{passive:false});
+  scrollEl.addEventListener("dblclick",()=>apply(1));
+  state.redraw();
+}
+function zoomReset(id){ const s=ZOOMS.get(id); if(s){ s.z=1; s.scrollEl.scrollLeft=0; s.redraw() } }
+
 /* ---------- pinch and drag on a date-range chart ----------
    The war charts pinch against viewWin; these two run off their own date
    range instead, so they get their own binding: two fingers change the span
@@ -2539,27 +2624,10 @@ function bindRangePinch(el, get, set, minSpan){
   },{passive:false});
 }
 function bindDashCharts(){
-  // OC trend: a week is the tightest that still says anything through the smoothing
-  bindRangePinch($("ocChart"),
-    ()=>ocRaw? ocRange() : null,
-    (from,to,fast)=>{
-      const hi=now();
-      if(to>hi){ from-=to-hi; to=hi }
-      cfg.ocFrom=dayStr(Math.max(0,from)); cfg.ocTo=dayStr(to);
-      if(!fast) save(LS.cfg,cfg);
-      renderOC(fast);
-    }, 7*86400);
-  // armoury board: clamped to what was actually fetched, so you cannot pan into nothing
-  bindRangePinch($("homeArmRows"),
-    ()=>homeArm? {from:homeArm.from, to:homeArm.to} : null,
-    (from,to,fast)=>{
-      if(!homeArm) return;
-      const lo=homeArm.fetchedFrom ?? homeArm.from, hi=homeArm.fetchedTo ?? homeArm.to;
-      const span=Math.min(to-from, hi-lo);
-      if(from<lo){ from=lo; to=lo+span }
-      if(to>hi){ to=hi; from=hi-span }
-      homeArm.from=from; homeArm.to=to; renderHomeArm(fast);
-    }, 86400);
+  // The dates stay put; zoom just magnifies what is drawn and the bar says where
+  // in the span you are looking.
+  makeZoomable("homeArm", $("homeArmZoom"), $("homeArmRows"), $("homeArmBar"));
+  makeZoomable("ocChart", $("ocChartZoom"), $("ocChartInner"), $("ocChartBar"));
 }
 
 /* ---------- faction overview ----------
@@ -2834,6 +2902,7 @@ function renderOC(fast){
     + `<div class="octile"><b style="color:var(--steel)">$${fmtNum(faction)}</b><span>to faction · ${perDay(faction)}</span></div>`
     + `<div class="octile"><b>$${fmtNum(money)}</b><span>grand total · ${perDay(money)}</span></div>`;
   drawOcChart(crimes, from, to);
+  ZOOMS.get("ocChart")?.redraw();
   if(fast) return;                                   // mid-pinch: chart only
 
   $("ocHead").innerHTML=OC_COLS.map(c=>
