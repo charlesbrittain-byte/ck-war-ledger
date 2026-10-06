@@ -779,7 +779,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 13:17</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 13:38</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2402,6 +2402,7 @@ const FAC_COLS=[
   {k:"name",       label:"Member", left:true},
   {k:"wars",       label:"Wars"},
   {k:"hitsPerWar", label:"Hits / war"},
+  {k:"respPerWar", label:"Respect / war"},
   {k:"ocN",        label:"OCs"},
   {k:"ocRate",     label:"Won / lost"},
   {k:"pass",       label:"Pass rate"},
@@ -2412,9 +2413,12 @@ function renderFaction(){
   const ocRows=Object.values(ocPer||{});
   const by={};
   const get=id=>by[id]||(by[id]={id, name:(memberDir[id]&&memberDir[id].name)||("["+id+"]"),
-    wars:0, of:0, hitsPerWar:0, ocN:0, ocOk:0, ocFail:0, pass:null,
+    wars:0, of:0, hitsPerWar:0, rg:0, respPerWar:0, ocN:0, ocOk:0, ocFail:0, pass:null,
     inDays:0, idle:0, span:0, part:false, ex:!memberDir[id]});
-  for(const r of warRows){ const p=get(r.id); p.wars=r.wars; p.of=r.of; p.hitsPerWar=r.wars? r.of/r.wars : 0 }
+  for(const r of warRows){ const p=get(r.id);
+    p.wars=r.wars; p.of=r.of; p.rg=r.rg||0;
+    p.hitsPerWar=r.wars? r.of/r.wars : 0;
+    p.respPerWar=r.wars? (r.rg||0)/r.wars : 0 }
   for(const r of ocRows){ const p=get(r.id);
     p.ocN=r.n; p.ocOk=r.ok; p.ocFail=r.fail; p.pass=r.pass;
     p.inDays=r.inDays||0; p.idle=r.idle||0; p.span=r.span||0; p.part=!!r.part }
@@ -2436,6 +2440,7 @@ function renderFaction(){
     return `<tr><td style="text-align:left" class="name f-name">${esc(r.name)}</td>`
       + `<td class="f-wars">${r.wars||"–"}</td>`
       + `<td class="f-hitsPerWar ${r.hitsPerWar>=40?"pos":r.hitsPerWar>=15?"":"neg"}"><b>${r.hitsPerWar? r.hitsPerWar.toFixed(0):"–"}</b></td>`
+      + `<td class="f-respPerWar" style="${r.respPerWar?"color:var(--amber)":""}">${r.respPerWar? fmtR(r.respPerWar):"–"}</td>`
       + `<td class="f-ocN">${r.ocN||"–"}</td>`
       + `<td class="f-ocRate">${r.ocN? `<span class="rec"><span class="w pos">${r.ocOk}</span><span class="sl">/</span>`
           + `<span class="l ${r.ocFail?"neg":"zero"}">${r.ocFail}</span>`
@@ -2444,17 +2449,18 @@ function renderFaction(){
       + `<td class="f-idle">${r.span? `<span class="rec"><span class="w">${r.inDays}</span><span class="sl">/</span>`
         + `<span class="l ${idlePct>0.5?"neg":idlePct>0.25?"warn":"zero"}">${r.idle}</span>`
         + (r.part? `<span class="meta" style="margin-left:4px">*</span>`:"") + `</span>` : `<span class="zero">–</span>`}</td></tr>`;
-  }).join("") : `<tr><td colspan="7" class="meta">Load the war history and crimes to fill this in.</td></tr>`;
+  }).join("") : `<tr><td colspan="8" class="meta">Load the war history and crimes to fill this in.</td></tr>`;
   const S=k=>rows.reduce((x,r)=>x+(r[k]||0),0);
   const passAll=rows.filter(r=>r.pass!=null);
   const avgPass=passAll.length? passAll.reduce((x,r)=>x+r.pass,0)/passAll.length : null;
   $("factblFoot").innerHTML=`<td style="text-align:left" class="f-name">Total</td><td class="f-wars"></td>`
-    + `<td class="f-hitsPerWar"></td><td class="f-ocN">${S("ocN")}</td>`
+    + `<td class="f-hitsPerWar"></td><td class="f-respPerWar" style="color:var(--amber)">${fmtR(S("rg"))}</td><td class="f-ocN">${S("ocN")}</td>`
     + `<td class="f-ocRate"><span class="rec"><span class="w pos">${S("ocOk")}</span><span class="sl">/</span>`
       + `<span class="l neg">${S("ocFail")}</span><span class="pc"></span></span></td>`
     + `<td class="f-pass ${passCls(avgPass)}">${avgPass==null?"–":Math.round(avgPass)+"%"}</td><td class="f-idle"></td>`;
   $("facHint").innerHTML = `War figures cover the last ${homeRows? homeRows.wars : "few"} wars; crime figures cover the range set on the Organised crime tab. `
-    + `<b>Hits / war</b> is the fairer comparison, since not everyone was here for every war. `
+    + `<b>Hits / war</b> and <b>respect / war</b> are the fairer comparisons, since not everyone was here for every war; `
+    + `the respect total for all wars sits in the footer. `
     + `A * means they joined partway through the crime range, so their days run from when they arrived. Former members are left out.`;
 }
 $("facReload").onclick=async()=>{ $("facProg").textContent="loading…"; await Promise.all([loadHome(), loadOC()]); $("facProg").textContent=""; renderFaction() };
