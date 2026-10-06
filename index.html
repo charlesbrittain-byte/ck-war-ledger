@@ -114,9 +114,14 @@ label.inl{color:var(--dim); font-size:14px; display:flex; align-items:center; ga
 .zwrap .tl-name{position:sticky; left:0; z-index:5; background:var(--panel); padding-right:4px}
 .zwrap .tl-axis .tl-name{background:var(--panel)}
 .zinner{width:100%}
-.zbar{position:relative; height:8px; margin-top:6px; background:#15181C; border:1px solid var(--line); border-radius:999px}
-.zbar-thumb{position:absolute; top:1px; bottom:1px; background:var(--amber); border-radius:999px; opacity:.85}
-.zbar-lbl{position:absolute; right:4px; top:-16px; font-size:11px; color:var(--faint)}
+.zctl{display:flex; align-items:center; gap:7px; margin-top:7px}
+.zbtn{padding:2px 9px; font-size:14px; line-height:1.5; border-radius:6px; min-width:30px}
+.zbtn[disabled]{opacity:.35; cursor:default}
+.zbar{position:relative; flex:1; height:10px; background:#15181C; border:1px solid var(--line);
+  border-radius:999px; cursor:pointer; touch-action:none}
+.zbar-thumb{position:absolute; top:1px; bottom:1px; background:var(--amber); border-radius:999px;
+  opacity:.85; min-width:10px; pointer-events:none}
+.zbar-lbl{font-size:12px; color:var(--faint); min-width:34px; text-align:right}
 .twocol{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr); gap:16px; margin-top:12px; align-items:start}
 .subhead{font-size:12px; font-weight:700; color:var(--faint); letter-spacing:.07em; text-transform:uppercase; margin-bottom:8px}
 .subhead .meta{font-weight:400; letter-spacing:0; text-transform:none}
@@ -454,7 +459,7 @@ details.settings summary{cursor:pointer}
     <span class="meta" id="homeArmProg"></span>
   </div>
   <div class="zwrap" id="homeArmZoom" style="margin-top:10px"><div class="zinner" id="homeArmRows"></div></div>
-  <div class="zbar" id="homeArmBar" hidden></div>
+  <div id="homeArmBar"></div>
   <div class="legend">
     <span><i style="background:var(--it-xan);height:10px;width:3px"></i>xanax</span>
     <span><i style="background:var(--it-sfak);height:10px;width:3px"></i>small first aid kit</span>
@@ -475,7 +480,7 @@ details.settings summary{cursor:pointer}
       <tfoot><tr id="hatblFoot"></tr></tfoot>
     </table>
   </div>
-  <p class="hint">Faction armoury only — items someone bought themselves never appear. Pinch to zoom (or ⌘/Ctrl + scroll, or double-click to reset) and the bar underneath shows where you are; the dates stay as they are. Weekends are shaded, so a training weekend shows up as a burst of xanax against the grey. Each tick is the exact minute an item was taken; hover one to see what it was.</p>
+  <p class="hint">Faction armoury only — items someone bought themselves never appear. Use the + and − buttons, pinch, or ⌘/Ctrl + scroll to zoom; drag the bar to move along it. The dates stay as they are. Weekends are shaded, so a training weekend shows up as a burst of xanax against the grey. Each tick is the exact minute an item was taken; hover one to see what it was.</p>
 </section>
 
 <!-- ORGANISED CRIME -->
@@ -508,7 +513,7 @@ details.settings summary{cursor:pointer}
   <p class="meta" id="ocTrendNote" style="margin-top:4px"></p>
   <div class="row" id="ocTotals" style="margin-top:12px; gap:20px"></div>
   <div class="zwrap" id="ocChartZoom"><div class="zinner" id="ocChartInner"><svg id="ocChart" class="occhart" preserveAspectRatio="none"></svg></div></div>
-  <div class="zbar" id="ocChartBar" hidden></div>
+  <div id="ocChartBar"></div>
   <div class="legend" id="ocChartLegend" hidden>
     <span><i style="background:var(--up)"></i>money per day</span>
     <span><i style="background:var(--amber)"></i>respect per day</span>
@@ -640,7 +645,7 @@ details.settings summary{cursor:pointer}
     <button id="tlTall" title="Taller rows, easier to read">Taller rows</button>
   </div>
   <div class="zwrap" id="tlZoom"><div class="zinner" id="tlRows"></div></div>
-  <div class="zbar" id="tlBar" hidden></div>
+  <div id="tlBar"></div>
   <div class="legend">
     <span><i style="background:var(--tl-ok)"></i>okay / attackable</span>
     <span><i style="background:var(--tl-ehosp)"></i>hospitalised by enemy</span>
@@ -693,7 +698,7 @@ details.settings summary{cursor:pointer}
     <div class="meta" id="armMeta"></div>
   </div>
   <div class="zwrap" id="armZoom"><div class="zinner" id="armRows"></div></div>
-  <div class="zbar" id="armBar" hidden></div>
+  <div id="armBar"></div>
   <div class="legend">
     <span><i style="background:var(--it-xan);height:10px;width:3px"></i>xanax</span>
     <span><i style="background:var(--it-sfak);height:10px;width:3px"></i>small first aid kit</span>
@@ -836,7 +841,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 16:30</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 16:40</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2528,6 +2533,7 @@ function makeZoomable(id, scrollEl, contentEl, barEl){
   const state={z, scrollEl, contentEl, barEl};
   ZOOMS.set(id,state);
   const MAXZ=40;
+  state.apply=(nz, anchorClientX)=>apply(nz, anchorClientX);
   const apply=(nz, anchorClientX)=>{
     const prev=state.z;
     nz=Math.min(MAXZ, Math.max(1, nz));
@@ -2540,14 +2546,44 @@ function makeZoomable(id, scrollEl, contentEl, barEl){
     scrollEl.scrollLeft=atContent*nz-ax;
     drawBar();
   };
+  // the controls live here permanently: buttons for the mouse, a track you can
+  // drag or click, and the factor — no modifier keys needed
+  if(barEl && !barEl.dataset.built){
+    barEl.dataset.built="1";
+    barEl.className="zctl";
+    barEl.innerHTML=`<button class="zbtn" data-z="out" title="Zoom out">−</button>`
+      + `<button class="zbtn" data-z="in" title="Zoom in">+</button>`
+      + `<button class="zbtn" data-z="fit" title="Fit the whole span">Fit</button>`
+      + `<div class="zbar"><div class="zbar-thumb"></div></div><span class="zbar-lbl">1.0×</span>`;
+    barEl.addEventListener("click",e=>{
+      const b=e.target.closest("[data-z]"); if(!b) return;
+      const s2=ZOOMS.get(id); if(!s2) return;
+      if(b.dataset.z==="in") s2.apply(s2.z*1.5);
+      else if(b.dataset.z==="out") s2.apply(s2.z/1.5);
+      else s2.apply(1);
+    });
+    const track=barEl.querySelector(".zbar");
+    const seek=ev=>{
+      const r=track.getBoundingClientRect();
+      const frac=Math.min(1,Math.max(0,(ev.clientX-r.left)/(r.width||1)));
+      const total=scrollEl.scrollWidth, view=scrollEl.clientWidth;
+      scrollEl.scrollLeft=Math.max(0, frac*total - view/2);   // centre on where you clicked
+    };
+    track.addEventListener("pointerdown",ev=>{ track.setPointerCapture(ev.pointerId); seek(ev) });
+    track.addEventListener("pointermove",ev=>{ if(ev.buttons) seek(ev) });
+  }
   const drawBar=()=>{
     if(!barEl) return;
-    const total=scrollEl.scrollWidth||1, view=scrollEl.clientWidth||1;
-    if(state.z<=1.001){ barEl.hidden=true; return }
     barEl.hidden=false;
-    const w=Math.max(6, 100*view/total), l=100*scrollEl.scrollLeft/total;
-    barEl.innerHTML=`<div class="zbar-thumb" style="left:${l.toFixed(2)}%;width:${w.toFixed(2)}%"></div>`
-      + `<div class="zbar-lbl">${state.z.toFixed(1)}×</div>`;
+    const total=scrollEl.scrollWidth||1, view=scrollEl.clientWidth||1;
+    const w=Math.min(100, 100*view/total), l=100*scrollEl.scrollLeft/total;
+    const thumb=barEl.querySelector(".zbar-thumb");
+    if(thumb){ thumb.style.left=l.toFixed(2)+"%"; thumb.style.width=w.toFixed(2)+"%" }
+    const lbl=barEl.querySelector(".zbar-lbl"); if(lbl) lbl.textContent=state.z.toFixed(1)+"×";
+    const out=barEl.querySelector('[data-z="out"]'), fit=barEl.querySelector('[data-z="fit"]');
+    if(out) out.disabled = state.z<=1.001;
+    if(fit) fit.disabled = state.z<=1.001;
+    const inb=barEl.querySelector('[data-z="in"]'); if(inb) inb.disabled = state.z>=MAXZ-0.001;
   };
   state.redraw=()=>{ contentEl.style.width=(state.z*100)+"%"; drawBar() };
   if(scrollEl.dataset.zoomable){ state.redraw(); return }
