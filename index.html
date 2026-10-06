@@ -779,7 +779,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 13:38</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 15:48</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2082,7 +2082,7 @@ async function loadHomeArm(){
   }catch(e){ $("homeArmProg").textContent=e.message }
   finally{ btn.disabled=false }
 }
-function renderHomeArm(){
+function renderHomeArm(fast){
   if(!homeArm){
     $("homeArmRows").innerHTML=`<p class="meta">Press Load to pull the armoury log.</p>`;
     $("hatblBody").innerHTML=""; $("hatblFoot").innerHTML=""; $("homeArmMeta").textContent=""; return;
@@ -2095,15 +2095,21 @@ function renderHomeArm(){
     p.evs.push(e);
     if(e.cls==="pts") p.pts+=e.pts||0; else p[e.cls]=(p[e.cls]||0)+1;
   }
-  // weekend bands and midnight separators, drawn behind the ticks
-  let bg="";
+  // Weekend shading and midnight lines used to be a div per day per member —
+  // hundreds of nodes rebuilt on every frame of a pinch. They are two repeating
+  // gradients now: one string, no nodes, and the whole row is a single paint.
   const startDay=Math.floor(from/86400)*86400;
-  for(let d=startDay; d<to; d+=86400){
-    const wd=new Date(d*1000).getUTCDay();          // 0 Sun, 6 Sat
-    const a=Math.max(d,from), b=Math.min(d+86400,to);
-    if(wd===0||wd===6) bg+=`<div class="tl-weekend" style="left:${X(a).toFixed(2)}%;width:${(X(b)-X(a)).toFixed(2)}%"></div>`;
-    if(d>from) bg+=`<div class="tl-day" style="left:${X(d).toFixed(2)}%"></div>`;
-  }
+  const dayPct=86400/span*100, weekPct=dayPct*7;
+  let firstSat=startDay;
+  while(new Date(firstSat*1000).getUTCDay()!==6) firstSat+=86400;
+  const satPct=X(firstSat);
+  const bgStyle=
+    `background:`
+    + `repeating-linear-gradient(90deg,transparent 0 ${satPct.toFixed(3)}%,`
+      + `#313944 ${satPct.toFixed(3)}% ${(satPct+2*dayPct).toFixed(3)}%,`
+      + `transparent ${(satPct+2*dayPct).toFixed(3)}% ${(satPct+weekPct).toFixed(3)}%),`
+    + `repeating-linear-gradient(90deg,rgba(10,12,14,.5) 0 1px,transparent 1px ${dayPct.toFixed(3)}%),`
+    + `var(--panel2);`;
   // one sort drives both the chart rows and the table, so clicking "Xanax"
   // puts the heaviest users at the top of the timeline too
   const cmp=(a,b)=>{
@@ -2122,10 +2128,11 @@ function renderHomeArm(){
   $("homeArmRows").innerHTML = ids.length
     ? axis + ids.map(id=>{
         const ticks=per[id].evs.map(e=>`<div class="tl-tick am ${e.cls}" style="left:${X(e.t).toFixed(2)}%" title="${esc(e.item)} · ${fmtDT(e.t)}"></div>`).join("");
-        return `<div class="tl-row"><div class="tl-name">${esc(per[id].name)}</div><div class="tl-band">${bg}${ticks}</div></div>`;
+        return `<div class="tl-row"><div class="tl-name">${esc(per[id].name)}</div><div class="tl-band" style="${bgStyle}">${ticks}</div></div>`;
       }).join("")
     : `<p class="meta">Nothing taken from the armoury in this period.</p>`;
   $("homeArmMeta").textContent=`${fmtDate(from)} → ${fmtDate(to)} · ${evs.length} event${evs.length===1?"":"s"} · loaded ${ago(homeArm.at)}`;
+  if(fast) return;                                   // mid-pinch: skip the table
   $("haHead").innerHTML=HARM_COLS.map(c=>
     `<th data-k="${c.k}" class="a-${c.k}${haSort.k===c.k?" sorted":""}" style="${c.left?"text-align:left":""}">${c.label}</th>`).join("");
   const cell=(v,css,k)=>`<td class="a-${k} ${v?"":"zero"}" style="${v?`color:var(${css})`:""}">${v||"–"}</td>`;
@@ -2329,6 +2336,15 @@ function bindRangePinch(el, get, set, minSpan){
   if(!el || el.dataset.rpinch) return;
   el.dataset.rpinch="1";
   const MIN=minSpan||2*86400;
+  // touchmove fires far faster than we can redraw, so collapse a burst of them
+  // into one render per animation frame, and do the full render on release
+  let pending=null, raf=0;
+  const push=(from,to)=>{
+    pending=[from,to];
+    if(raf) return;
+    raf=requestAnimationFrame(()=>{ raf=0; const p=pending; set(p[0],p[1],true) });
+  };
+  const settle=()=>{ if(pending){ set(pending[0],pending[1],false); pending=null } };
   let mode=null, r0=null, startDist=0, startX=0, w=1, anchor=0;
   const dist=t=>Math.abs(t[0].clientX-t[1].clientX);
   const mid =t=>(t[0].clientX+t[1].clientX)/2;
@@ -2348,16 +2364,16 @@ function bindRangePinch(el, get, set, minSpan){
       e.preventDefault();
       const span=Math.max(MIN, span0*(startDist/(dist(e.touches)||1)));
       const frac=(anchor-r0.from)/span0;
-      set(anchor-span*frac, anchor+span*(1-frac));
+      push(anchor-span*frac, anchor+span*(1-frac));
     } else if(mode==="pan" && e.touches.length===1){
       const dx=e.touches[0].clientX-startX;
       if(Math.abs(dx)<6) return;
       e.preventDefault();
       const shift=-(dx/w)*span0;
-      set(r0.from+shift, r0.to+shift);
+      push(r0.from+shift, r0.to+shift);
     }
   },{passive:false});
-  const done=()=>{ mode=null };
+  const done=()=>{ mode=null; settle() };
   el.addEventListener("touchend",done); el.addEventListener("touchcancel",done);
   el.addEventListener("wheel",e=>{
     const r=get(); if(!r || !(e.ctrlKey||e.metaKey)) return;
@@ -2366,29 +2382,30 @@ function bindRangePinch(el, get, set, minSpan){
     const at = r.from + ((e.clientX-rect.left)/(rect.width||1))*span0;
     const span=Math.max(MIN, span0*(e.deltaY>0? 1.25 : 0.8));
     const frac=(at-r.from)/span0;
-    set(at-span*frac, at+span*(1-frac));
+    set(at-span*frac, at+span*(1-frac), false);
   },{passive:false});
 }
 function bindDashCharts(){
   // OC trend: a week is the tightest that still says anything through the smoothing
   bindRangePinch($("ocChart"),
     ()=>ocRaw? ocRange() : null,
-    (from,to)=>{
+    (from,to,fast)=>{
       const hi=now();
       if(to>hi){ from-=to-hi; to=hi }
       cfg.ocFrom=dayStr(Math.max(0,from)); cfg.ocTo=dayStr(to);
-      save(LS.cfg,cfg); renderOC();
+      if(!fast) save(LS.cfg,cfg);
+      renderOC(fast);
     }, 7*86400);
   // armoury board: clamped to what was actually fetched, so you cannot pan into nothing
   bindRangePinch($("homeArmRows"),
     ()=>homeArm? {from:homeArm.from, to:homeArm.to} : null,
-    (from,to)=>{
+    (from,to,fast)=>{
       if(!homeArm) return;
       const lo=homeArm.fetchedFrom ?? homeArm.from, hi=homeArm.fetchedTo ?? homeArm.to;
       const span=Math.min(to-from, hi-lo);
       if(from<lo){ from=lo; to=lo+span }
       if(to>hi){ to=hi; from=hi-span }
-      homeArm.from=from; homeArm.to=to; renderHomeArm();
+      homeArm.from=from; homeArm.to=to; renderHomeArm(fast);
     }, 86400);
 }
 
@@ -2613,7 +2630,7 @@ function drawOcChart(crimes, from, to){
     `first ${half} days (${fmtDate(from)} → ${fmtDate(from+(half-1)*86400)}) against the last ${n-half} `
     + `(${fmtDate(from+half*86400)} → ${fmtDate(to)}), on the ${smooth>1? smooth+"-day average":"daily"} figures`;
 }
-function renderOC(){
+function renderOC(fast){
   const rg=ocRange();
   $("ocFrom").value=dayStr(rg.from); $("ocTo").value=dayStr(rg.to);
   $("ocSmooth").value=String(cfg.ocSmooth||30);
@@ -2664,6 +2681,7 @@ function renderOC(){
     + `<div class="octile"><b style="color:var(--steel)">$${fmtNum(faction)}</b><span>to faction · ${perDay(faction)}</span></div>`
     + `<div class="octile"><b>$${fmtNum(money)}</b><span>grand total · ${perDay(money)}</span></div>`;
   drawOcChart(crimes, from, to);
+  if(fast) return;                                   // mid-pinch: chart only
 
   $("ocHead").innerHTML=OC_COLS.map(c=>
     `<th data-k="${c.k}" class="${ocSort.k===c.k?"sorted":""}" style="${c.left?"text-align:left":""}">${c.label}</th>`).join("");
