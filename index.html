@@ -216,6 +216,7 @@ details.settings summary{cursor:pointer}
   /* ...unless you ask for everything back, which scrolls sideways by choice */
   body.cols-all .c-as, body.cols-all .c-rl, body.cols-all .c-lastHit, body.cols-all .c-status, body.cols-all .c-rg,
   body.cols-all .h-lvl, body.cols-all .h-as, body.cols-all .h-rl, body.cols-all .h-ff, body.cols-all .h-ag,
+  body.cols-all .f-wars, body.cols-all .f-of, body.cols-all .f-ocN,
   body.cols-all .a-other, body.cols-all .w-morph, body.cols-all .w-blood, body.cols-all .w-other,
   body.cols-all .w-pts, body.cols-all .w-refill{display:table-cell !important}
   body.cols-all #octbl th, body.cols-all #octbl td,
@@ -250,6 +251,8 @@ details.settings summary{cursor:pointer}
   #mdtbl th:nth-child(2), #mdtbl td:nth-child(2),
   #mdtbl th:nth-child(5), #mdtbl td:nth-child(5),
   #mdtbl th:nth-child(6), #mdtbl td:nth-child(6){display:none}
+  /* faction overview: totals go, the per-war and per-crime rates stay */
+  .f-wars, .f-of, .f-ocN{display:none}
   /* OC member table (Member, Crimes, Record, Chance, Days in, Idle, Respect, Payout):
      drop days-in and respect, keep chance and idle — those are the ones acted on */
   #octbl th:nth-child(2), #octbl td:nth-child(2),
@@ -306,7 +309,7 @@ details.settings summary{cursor:pointer}
     <div class="topline">
       <h1>War <span>Ledger</span></h1>
       <div class="vsline" id="vsline" hidden></div>
-      <button id="switchWar" hidden>⟵ Dashboard</button>
+      <button id="switchWar" hidden>Close war</button>
       <button id="colsBtn" class="mobonly" title="Show every column (scrolls sideways)">⤢ All columns</button>
       <div class="meta" style="margin-left:auto"><span class="statusdot" id="dot"></span><span id="pollmeta">not connected</span></div>
     </div>
@@ -332,6 +335,26 @@ details.settings summary{cursor:pointer}
   <button data-tab="faction">Faction</button>
   <button data-tab="oc">Organised crime</button>
 </nav>
+
+<!-- FACTION OVERVIEW -->
+<section id="facCard" class="card" hidden>
+  <div class="scrubhead">
+    <h2 style="margin:0">Members — war and crime at a glance</h2>
+    <div class="meta" id="facMeta"></div>
+  </div>
+  <div class="zoomrow">
+    <button id="facReload" class="primary">Reload</button>
+    <span class="meta" id="facProg"></span>
+  </div>
+  <div class="tblwrap" style="margin-top:10px">
+    <table id="factbl" style="min-width:740px">
+      <thead><tr id="facHead"></tr></thead>
+      <tbody id="factblBody"></tbody>
+      <tfoot><tr id="factblFoot"></tr></tfoot>
+    </table>
+  </div>
+  <p class="hint" id="facHint"></p>
+</section>
 
 <!-- HOME DASHBOARD -->
 <section id="homeCard" class="card" hidden>
@@ -744,7 +767,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:27</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:42</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -847,7 +870,7 @@ $("connectBtn").onclick = async ()=>{
     save(LS.cfg, cfg);
     clearErr();
     await loadWarList();
-    $("setup").hidden = true; $("dashTabs").hidden = false; renderHome(); renderHomeArm(); renderOC(); showTab(cfg.dashTab||dashTab);
+    $("setup").hidden = true; $("dashTabs").hidden = false; renderHome(); renderHomeArm(); renderOC(); renderFaction(); showTab(cfg.dashTab||dashTab);
   }catch(e){ showErr(e.message) }
   $("connectBtn").disabled = false; $("connectBtn").textContent="Connect";
 };
@@ -1065,16 +1088,14 @@ async function pollScore(){
 
 /* ---------- polling loops ---------- */
 function startTracking(){
-  for(const id of ["dashTabs","warpick","homeCard","homeArmCard","ocCard","ocPartCard","ocTypeCard"]) $(id).hidden = true;
-  for(const id of ["scrubCard","tableCard","tlCard","medCard","armCard","payCard","qualityCard"]) $(id).hidden=false;
+  $("dashTabs").hidden=false;
   const es = load(LS.esnap(war.warId)); if(es){ enemyDir=es.dir||{}; enemyStatus=es.status||{} }
   medEvents = load(LS.med(war.warId))||[];
   armoury = load(LS.arm(war.warId))||[]; armIds = new Set(armoury.map(a=>a.nid).filter(Boolean));
   ptsGiven = load(LS.pts(war.warId))||[]; ptsIds = new Set(ptsGiven.map(a=>a.nid).filter(Boolean));
   refills = load(LS.ref(war.warId))||[]; refillIds = new Set(refills.map(a=>a.nid).filter(Boolean));
   newsCur = load(LS.cur(war.warId)) || {arm:0, pts:0};
-  $("settings").hidden=false;
-  $("switchWar").hidden=false;
+
   $("pAtk").value=cfg.pAtk; $("pMem").value=cfg.pMem;
   $("syncUrl").value=cfg.syncUrl||""; $("syncTok").value=cfg.syncTok||"";
   if(cfg.tlTall){ $("tlRows").classList.add("tl-tall"); $("tlTall").className="on" }
@@ -1084,9 +1105,9 @@ function startTracking(){
   if(cfg.syncUrl){ fetchServerSnaps().then(c=>{ if(c) renderAll() }); fetchTerms().then(c=>{ if(c) renderAll() }) }
   renderTerms();
   liveMode = true; scrubT = clampT(now());
+  showTab("war");           // reveals the war cards under the picker
   renderAll();              // draw cached data at once: a failing first poll
   bindCharts();
-  window.scrollTo(0,0);     // entering a war is a page change, not a jump within one
   schedule(); tick(true);   // used to leave the whole war page blank
 }
 function schedule(){
@@ -1934,6 +1955,7 @@ async function loadHome(){
     }
     for(const p of Object.values(per)){ p.net=p.rg-p.rl; p.ff=p.ffN? p.ffS/p.ffN : 0 }
     homeRows={rows:Object.values(per), wars:wars.length, at:now(), failed};
+    if(!$("facCard").hidden) setTimeout(renderFaction,0);
     $("homeProg").textContent = failed? `${failed} war log${failed>1?"s":""} couldn't be read` : "";
     renderHome();
   }catch(e){ $("homeProg").textContent=e.message }
@@ -2260,19 +2282,102 @@ $("payCsv").onclick=()=>{
 };
 
 /* ---------- dashboard tabs ---------- */
-const TABS={ war:["warpick"], faction:["homeCard","homeArmCard"], oc:["ocCard","ocPartCard","ocTypeCard"] };
-let dashTab = "war";
+const WAR_CARDS=["scrubCard","tableCard","tlCard","medCard","armCard","payCard","qualityCard"];
+const TABS={ faction:["facCard","homeArmCard"], war:["homeCard","warpick"], oc:["ocCard","ocPartCard","ocTypeCard"] };
+let dashTab = "faction";
 function showTab(t){
-  dashTab = TABS[t]? t : "war";
+  dashTab = TABS[t]? t : "faction";
   cfg.dashTab = dashTab; save(LS.cfg,cfg);
   for(const b of $("dashTabs").querySelectorAll("button")) b.className = b.dataset.tab===dashTab? "on":"";
   for(const [k,ids] of Object.entries(TABS))
     for(const id of ids) $(id).hidden = (k!==dashTab);
-  if(dashTab==="faction"){ if(!homeRows) loadHome(); if(!homeArm) loadHomeArm() }
+  // a war opens underneath the war tab rather than replacing the page
+  const inWar = dashTab==="war" && !!war;
+  for(const id of WAR_CARDS) $(id).hidden = !inWar;
+  $("settings").hidden = !inWar;
+  $("switchWar").hidden = !inWar;
+  $("vsline").hidden = !inWar;
+  if(dashTab==="faction"){ if(!homeRows) loadHome(); if(!ocRaw) loadOC(); if(!homeArm) loadHomeArm(); renderFaction() }
+  if(dashTab==="war" && !homeRows) loadHome();
   if(dashTab==="oc" && !ocRaw) loadOC();
   window.scrollTo(0,0);
 }
 $("dashTabs").addEventListener("click",e=>{ const b=e.target.closest("button[data-tab]"); if(b) showTab(b.dataset.tab) });
+
+/* ---------- faction overview ----------
+   One row per member pulling both halves together: how they fight and how they
+   crime. War figures come from the same cached war logs the form table uses,
+   OC figures from the crimes already loaded for that tab, so this costs no
+   extra calls once either has been opened. */
+let facSort={k:"hitsPerWar",dir:-1};
+const FAC_COLS=[
+  {k:"name",       label:"Member", left:true},
+  {k:"wars",       label:"Wars"},
+  {k:"of",         label:"Hits"},
+  {k:"hitsPerWar", label:"Hits / war"},
+  {k:"ocN",        label:"Crimes"},
+  {k:"ocRate",     label:"Won / lost"},
+  {k:"pass",       label:"Pass rate"},
+  {k:"idle",       label:"Days in / idle"}
+];
+function renderFaction(){
+  const warRows=homeRows? homeRows.rows : [];
+  const ocRows=Object.values(ocPer||{});
+  const by={};
+  const get=id=>by[id]||(by[id]={id, name:(memberDir[id]&&memberDir[id].name)||("["+id+"]"),
+    wars:0, of:0, hitsPerWar:0, ocN:0, ocOk:0, ocFail:0, pass:null,
+    inDays:0, idle:0, span:0, part:false, ex:!memberDir[id]});
+  for(const r of warRows){ const p=get(r.id); p.wars=r.wars; p.of=r.of; p.hitsPerWar=r.wars? r.of/r.wars : 0 }
+  for(const r of ocRows){ const p=get(r.id);
+    p.ocN=r.n; p.ocOk=r.ok; p.ocFail=r.fail; p.pass=r.pass;
+    p.inDays=r.inDays||0; p.idle=r.idle||0; p.span=r.span||0; p.part=!!r.part }
+  for(const id of Object.keys(memberDir)) get(+id);       // the roster decides who appears
+  const rows=Object.values(by).filter(r=>!r.ex).sort((a,b)=>{
+    if(facSort.k==="ocRate"){ const ra=a.ocN?a.ocOk/a.ocN:0, rb=b.ocN?b.ocOk/b.ocN:0; return (ra-rb)*facSort.dir }
+    const va=a[facSort.k]??0, vb=b[facSort.k]??0;
+    return (typeof va==="string"? va.localeCompare(vb) : va-vb)*facSort.dir;
+  });
+  const missing=[!homeRows&&"war history", !ocRaw&&"crimes"].filter(Boolean);
+  $("facMeta").textContent = missing.length
+    ? "waiting on "+missing.join(" and ")
+    : `${rows.length} members · last ${homeRows.wars} wars · crimes over ${Math.max(1,Math.round((ocRange().to-ocRange().from)/86400))} days`;
+  $("facHead").innerHTML=FAC_COLS.map(c=>
+    `<th data-k="${c.k}" class="f-${c.k}${facSort.k===c.k?" sorted":""}" style="${c.left?"text-align:left":""}">${c.label}</th>`).join("");
+  $("factblBody").innerHTML = rows.length? rows.map(r=>{
+    const pct=r.ocN? Math.round(100*r.ocOk/r.ocN):0;
+    const idlePct=r.span? r.idle/r.span : 0;
+    return `<tr><td style="text-align:left" class="name f-name">${esc(r.name)}</td>`
+      + `<td class="f-wars">${r.wars||"–"}</td>`
+      + `<td class="f-of">${r.of? fmtNum(r.of):"–"}</td>`
+      + `<td class="f-hitsPerWar ${r.hitsPerWar>=40?"pos":r.hitsPerWar>=15?"":"neg"}"><b>${r.hitsPerWar? r.hitsPerWar.toFixed(0):"–"}</b></td>`
+      + `<td class="f-ocN">${r.ocN||"–"}</td>`
+      + `<td class="f-ocRate">${r.ocN? `<span class="rec"><span class="w pos">${r.ocOk}</span><span class="sl">/</span>`
+          + `<span class="l ${r.ocFail?"neg":"zero"}">${r.ocFail}</span>`
+          + `<span class="pc ${pct>=70?"pos":pct>=50?"":"neg"}">${pct}%</span></span>` : `<span class="zero">–</span>`}</td>`
+      + `<td class="f-pass ${passCls(r.pass)}">${r.pass==null?"–":Math.round(r.pass)+"%"}</td>`
+      + `<td class="f-idle">${r.span? `<span class="rec"><span class="w">${r.inDays}</span><span class="sl">/</span>`
+        + `<span class="l ${idlePct>0.5?"neg":idlePct>0.25?"warn":"zero"}">${r.idle}</span>`
+        + (r.part? `<span class="meta" style="margin-left:4px">*</span>`:"") + `</span>` : `<span class="zero">–</span>`}</td></tr>`;
+  }).join("") : `<tr><td colspan="8" class="meta">Load the war history and crimes to fill this in.</td></tr>`;
+  const S=k=>rows.reduce((x,r)=>x+(r[k]||0),0);
+  const passAll=rows.filter(r=>r.pass!=null);
+  const avgPass=passAll.length? passAll.reduce((x,r)=>x+r.pass,0)/passAll.length : null;
+  $("factblFoot").innerHTML=`<td style="text-align:left" class="f-name">Total</td><td class="f-wars"></td>`
+    + `<td class="f-of">${fmtNum(S("of"))}</td><td class="f-hitsPerWar"></td><td class="f-ocN">${S("ocN")}</td>`
+    + `<td class="f-ocRate"><span class="rec"><span class="w pos">${S("ocOk")}</span><span class="sl">/</span>`
+      + `<span class="l neg">${S("ocFail")}</span><span class="pc"></span></span></td>`
+    + `<td class="f-pass ${passCls(avgPass)}">${avgPass==null?"–":Math.round(avgPass)+"%"}</td><td class="f-idle"></td>`;
+  $("facHint").innerHTML = `War figures cover the last ${homeRows? homeRows.wars : "few"} wars; crime figures cover the range set on the Organised crime tab. `
+    + `<b>Hits / war</b> is the fairer comparison, since not everyone was here for every war. `
+    + `A * means they joined partway through the crime range, so their days run from when they arrived. Former members are left out.`;
+}
+$("facReload").onclick=async()=>{ $("facProg").textContent="loading…"; await Promise.all([loadHome(), loadOC()]); $("facProg").textContent=""; renderFaction() };
+$("facHead").addEventListener("click",e=>{
+  const th=e.target.closest("th[data-k]"); if(!th) return;
+  const k=th.dataset.k;
+  facSort = facSort.k===k? {k, dir:-facSort.dir} : {k, dir: k==="name"? 1 : -1};
+  renderFaction();
+});
 
 /* ---------- organised crime ----------
    /faction/crimes gives finished crimes with their rewards, and the default
@@ -2332,7 +2437,7 @@ async function loadOC(){
     }
     ocRaw={ done:(done.crimes||[]), live:(live.crimes||[]), at:now() };
     $("ocProg").textContent="";
-    renderOC();
+    renderOC(); if(!$("facCard").hidden) renderFaction();
   }catch(e){ $("ocProg").textContent=e.message }
   finally{ btn.disabled=false }
 }
@@ -2652,7 +2757,7 @@ $("switchWar").onclick = async ()=>{
   // this war" — the picker's Continue button needs it to still be there.
   const wasTracking = war;
   liveMode=true;
-  for(const id of ["scrubCard","tableCard","tlCard","medCard","armCard","payCard","qualityCard"]) $(id).hidden=true;
+  for(const id of WAR_CARDS) $(id).hidden=true;
   $("settings").hidden=true; $("switchWar").hidden=true; $("vsline").hidden=true;
   $("pollmeta").textContent="dashboard"; $("dot").className="statusdot";
   try{ await loadWarList() }catch(e){}
@@ -2660,7 +2765,7 @@ $("switchWar").onclick = async ()=>{
     $("resumeWar").hidden=false;
     $("resumeWar").textContent = "Continue tracking " + (wasTracking.oppName||"last war") + " ⟶";
   }
-  $("dashTabs").hidden=false; renderHome(); renderHomeArm(); renderOC(); showTab(cfg.dashTab||dashTab);
+  $("dashTabs").hidden=false; renderHome(); renderHomeArm(); renderOC(); renderFaction(); showTab(cfg.dashTab||dashTab);
   window.scrollTo({top:0});
 };
 
@@ -2867,7 +2972,7 @@ function tsToLocalInput(t){ return new Date(t*1000).toISOString().slice(0,16) }
       $("resumeWar").textContent = "Continue tracking " + (war.oppName||"last war") + " ⟶";
     }
     loadWarList()
-      .then(()=>{ $("dashTabs").hidden=false; renderHome(); renderHomeArm(); renderOC();
+      .then(()=>{ $("dashTabs").hidden=false; renderHome(); renderHomeArm(); renderOC(); renderFaction();
                   showTab(cfg.dashTab||dashTab); })
       .catch(e=>{ $("setup").hidden=false; showErr(e.message) });
   }
