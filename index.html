@@ -16,6 +16,7 @@
   /* armoury item colours, kept distinct against the dark bands */
   --it-xan:#F2F4F6; --it-sfak:#E04B52; --it-fak:#4C9BE0; --it-morph:#B06FE0;
   --it-blood:#57B26A; --it-other:#7C858E; --it-pts:#3FC9B8; --it-refill:#F0C33C;
+  --it-ebag:#2E7D57; --it-beer:#C89B3C; --it-candy:#E86FA8;
   --tl-ok:#2E4633; --tl-ehosp:#7A3336; --tl-shosp:#8A6420; --tl-travel:#2F4A5C; --tl-other:#3A3F46;
 }
 *{box-sizing:border-box; margin:0; padding:0}
@@ -104,6 +105,13 @@ label.inl{color:var(--dim); font-size:14px; display:flex; align-items:center; ga
 .wb .lvl{color:var(--dim)}
 /* zoom controls (shared by the timeline and the turtle board) */
 .zoomrow{display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:8px}
+.tabs{display:flex; gap:6px; margin-top:11px; flex-wrap:wrap}
+.tabs button{padding:8px 16px; font-size:15px; font-weight:600; border-radius:8px 8px 0 0; color:var(--dim)}
+.tabs button.on{background:var(--panel); border-color:var(--line); border-bottom-color:var(--panel); color:var(--text)}
+.tabs button.on::before{content:""; display:inline-block; width:3px; height:13px; background:var(--amber); border-radius:2px; margin-right:7px; vertical-align:-2px}
+.octile{display:flex; flex-direction:column; gap:1px}
+.octile b{font-size:20px; font-weight:700}
+.octile span{color:var(--faint); font-size:12px; text-transform:uppercase; letter-spacing:.06em}
 .zoomrow{background:#181C21; border:1px solid var(--line); border-radius:8px; padding:7px 9px}
 .termsbar{background:#181C21; border:1px solid var(--line); border-radius:8px; padding:7px 9px; margin-top:7px}
 .termsbar .lbl{color:var(--faint); font-size:13px; letter-spacing:.03em}
@@ -162,6 +170,9 @@ td.name:hover{color:var(--amber)}
 .tl-tick.am.fak{background:var(--it-fak)}
 .tl-tick.am.morph{background:var(--it-morph)}
 .tl-tick.am.blood{background:var(--it-blood)}
+.tl-tick.am.ebag{background:var(--it-ebag)}
+.tl-tick.am.beer{background:var(--it-beer)}
+.tl-tick.am.candy{background:var(--it-candy)}
 .tl-tick.am.other{background:var(--it-other)}
 .tl-tick.am.pts{background:var(--it-pts)}
 .tl-tick.am.refill{background:var(--it-refill)}
@@ -283,6 +294,13 @@ details.settings summary{cursor:pointer}
   <p class="hint">Use a <b>Limited</b> key (torn.com → Settings → API keys), from a member who has the <b>API access</b> faction permission — that's what unlocks the faction attack log. The key is stored only in this browser and sent only to api.torn.com.</p>
 </section>
 
+<!-- DASHBOARD TABS -->
+<nav id="dashTabs" class="tabs" hidden>
+  <button data-tab="war" class="on">War</button>
+  <button data-tab="faction">Faction</button>
+  <button data-tab="oc">Organised crime</button>
+</nav>
+
 <!-- HOME DASHBOARD -->
 <section id="homeCard" class="card" hidden>
   <div class="scrubhead">
@@ -358,6 +376,9 @@ details.settings summary{cursor:pointer}
     <span><i style="background:var(--it-fak);height:10px;width:3px"></i>first aid kit</span>
     <span><i style="background:var(--it-morph);height:10px;width:3px"></i>morphine</span>
     <span><i style="background:var(--it-blood);height:10px;width:3px"></i>blood bag</span>
+    <span><i style="background:var(--it-ebag);height:10px;width:3px"></i>bag filled</span>
+    <span><i style="background:var(--it-beer);height:10px;width:3px"></i>beer</span>
+    <span><i style="background:var(--it-candy);height:10px;width:3px"></i>candy</span>
     <span><i style="background:var(--it-other);height:10px;width:3px"></i>other item</span>
     <span><i style="background:var(--it-pts);height:10px;width:3px"></i>faction points given</span>
     <span><i style="background:#313944;border:1px solid var(--line)"></i>weekend</span>
@@ -370,6 +391,42 @@ details.settings summary{cursor:pointer}
     </table>
   </div>
   <p class="hint">Faction armoury only — items someone bought themselves never appear. Weekends are shaded, so a training weekend shows up as a burst of xanax against the grey. Each tick is the exact minute an item was taken; hover one to see what it was.</p>
+</section>
+
+<!-- ORGANISED CRIME -->
+<section id="ocCard" class="card" hidden>
+  <div class="scrubhead">
+    <h2 style="margin:0">Organised crime</h2>
+    <div class="meta" id="ocMeta"></div>
+  </div>
+  <div class="zoomrow">
+    <span class="lbl">Last</span>
+    <select id="ocN" style="padding:4px 8px">
+      <option value="20">20 crimes</option>
+      <option value="50" selected>50 crimes</option>
+      <option value="100">100 crimes</option>
+    </select>
+    <button id="ocLoad" class="primary">Load</button>
+    <span class="meta" id="ocProg"></span>
+  </div>
+  <div class="row" id="ocTotals" style="margin-top:10px; gap:18px"></div>
+  <div class="tblwrap" style="margin-top:10px">
+    <table id="octbl" style="min-width:680px">
+      <thead><tr id="ocHead"></tr></thead>
+      <tbody id="octblBody"></tbody>
+      <tfoot><tr id="octblFoot"></tr></tfoot>
+    </table>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button id="ocToggle">Show each crime</button>
+  </div>
+  <div class="tblwrap" id="ocCrimesWrap" hidden style="margin-top:10px">
+    <table id="occtbl" style="min-width:680px">
+      <thead><tr><th style="text-align:left">Crime</th><th>Diff</th><th style="text-align:left">Executed</th><th style="text-align:left">Result</th><th>Money</th><th>Respect</th><th style="text-align:left">Team</th></tr></thead>
+      <tbody id="occtblBody"></tbody>
+    </table>
+  </div>
+  <p class="hint" id="ocHint">Completed crimes only — ones still recruiting or planning are left out. Payout share is the money split across the filled slots at the percentage leadership actually paid, so it is what each person should have received rather than our guess at a fair split. Respect per member is each crime's respect divided by its team, so that column can total a point or two off the headline. Sort by any column; hover a name for the roles they filled.</p>
 </section>
 
 <!-- SCRUB -->
@@ -515,6 +572,9 @@ details.settings summary{cursor:pointer}
     <span><i style="background:var(--it-fak);height:10px;width:3px"></i>first aid kit</span>
     <span><i style="background:var(--it-morph);height:10px;width:3px"></i>morphine</span>
     <span><i style="background:var(--it-blood);height:10px;width:3px"></i>blood bag</span>
+    <span><i style="background:var(--it-ebag);height:10px;width:3px"></i>bag filled</span>
+    <span><i style="background:var(--it-beer);height:10px;width:3px"></i>beer</span>
+    <span><i style="background:var(--it-candy);height:10px;width:3px"></i>candy</span>
     <span><i style="background:var(--it-other);height:10px;width:3px"></i>other item</span>
     <span><i style="background:var(--it-pts);height:10px;width:3px"></i>faction points given</span>
     <span><i style="background:var(--it-refill);height:10px;width:3px"></i>refill</span>
@@ -612,7 +672,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-09-29 21:58</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 08:27</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="mback" class="modal-back">
@@ -698,7 +758,7 @@ $("connectBtn").onclick = async ()=>{
     save(LS.cfg, cfg);
     clearErr();
     await loadWarList();
-    $("setup").hidden = true; $("warpick").hidden = false; $("homeCard").hidden = false; $("homeArmCard").hidden = false; renderHome(); renderHomeArm();
+    $("setup").hidden = true; $("dashTabs").hidden = false; renderHome(); renderHomeArm(); renderOC(); showTab(cfg.dashTab||dashTab);
   }catch(e){ showErr(e.message) }
   $("connectBtn").disabled = false; $("connectBtn").textContent="Connect";
 };
@@ -916,7 +976,7 @@ async function pollScore(){
 
 /* ---------- polling loops ---------- */
 function startTracking(){
-  $("warpick").hidden = true; $("homeCard").hidden = true; $("homeArmCard").hidden = true;
+  for(const id of ["dashTabs","warpick","homeCard","homeArmCard","ocCard"]) $(id).hidden = true;
   for(const id of ["scrubCard","tableCard","tlCard","medCard","armCard","payCard","qualityCard"]) $(id).hidden=false;
   const es = load(LS.esnap(war.warId)); if(es){ enemyDir=es.dir||{}; enemyStatus=es.status||{} }
   medEvents = load(LS.med(war.warId))||[];
@@ -1572,6 +1632,8 @@ function scanRefill(n){
   return true;
 }
 const ARM_RE = /XID=(\d+)[^>]*>([^<]*)<\/a>\s*used one of the faction's (.+?) items?/i;
+// "filled one of the faction's Empty Blood Bags to create a Blood Bag : O+"
+const FILL_RE = /XID=(\d+)[^>]*>([^<]*)<\/a>\s*filled one of the faction's (.+?) to create/i;
 // order matters: "small first aid kit" must be tested before "first aid kit",
 // or every small kit would be counted as a full one
 function armClass(item){
@@ -1580,7 +1642,10 @@ function armClass(item){
   if(s.includes("small first aid")) return "sfak";
   if(s.includes("first aid")) return "fak";
   if(s.includes("morphine")) return "morph";
-  if(s.includes("blood bag")) return "blood";
+  if(s.includes("empty blood bag")) return "ebag";
+  if(s.includes("blood bag")) return "blood";          // any type: O+, A+, AB-, …
+  if(/\b(beer|lager|ale|cider|wine|whiskey|vodka|bottle of|keg)\b/.test(s)) return "beer";
+  if(/\b(lollipop|sweet|candy|chocolate|bon bon|jawbreaker|taffy|cherry|gumball)\b/.test(s)) return "candy";
   return "other";
 }
 const ARM_COLS = [
@@ -1588,6 +1653,9 @@ const ARM_COLS = [
   {k:"fak",   label:"First aid",  css:"--it-fak"},
   {k:"morph", label:"Morphine",   css:"--it-morph"},
   {k:"blood", label:"Blood bags", css:"--it-blood"},
+  {k:"ebag",  label:"Blood bags filled", css:"--it-ebag"},
+  {k:"beer",  label:"Beer",       css:"--it-beer"},
+  {k:"candy", label:"Candy",      css:"--it-candy"},
   {k:"other", label:"Other",      css:"--it-other"},
   {k:"pts",   label:"Faction points", css:"--it-pts"},
   {k:"refill",label:"Refills",       css:"--it-refill"}
@@ -1611,7 +1679,7 @@ async function syncArmoury(){
       oldest=Math.min(oldest, n.timestamp);
       if(scanRefill(n)) added++;
       if(armIds.has(n.id)) continue;
-      const m=ARM_RE.exec(n.text||"");
+      const m=ARM_RE.exec(n.text||"") || FILL_RE.exec(n.text||"");
       if(!m) continue;
       armIds.add(n.id);
       armoury.push({nid:n.id, t:n.timestamp, id:+m[1], name:m[2], item:m[3].trim()});
@@ -1657,17 +1725,17 @@ async function syncPoints(){
 function armCounts(){
   const per={};
   for(const a of armoury){
-    const p=per[a.id]||(per[a.id]={id:a.id,name:a.name,pre:0,war:0,sfak:0,fak:0,morph:0,blood:0,other:0,pts:0,refill:0});
+    const p=per[a.id]||(per[a.id]={id:a.id,name:a.name,pre:0,war:0,sfak:0,fak:0,morph:0,blood:0,other:0,ebag:0,beer:0,candy:0,pts:0,refill:0});
     const c=armClass(a.item);
     if(c==="xan"){ if(a.t<war.start) p.pre++; else p.war++ }
     else p[c]++;
   }
   for(const r of refills){
-    const p=per[r.id]||(per[r.id]={id:r.id,name:r.name,pre:0,war:0,sfak:0,fak:0,morph:0,blood:0,other:0,pts:0,refill:0});
+    const p=per[r.id]||(per[r.id]={id:r.id,name:r.name,pre:0,war:0,sfak:0,fak:0,morph:0,blood:0,other:0,ebag:0,beer:0,candy:0,pts:0,refill:0});
     p.refill++;
   }
   for(const g of ptsGiven){
-    const p=per[g.id]||(per[g.id]={id:g.id,name:g.name,pre:0,war:0,sfak:0,fak:0,morph:0,blood:0,other:0,pts:0,refill:0});
+    const p=per[g.id]||(per[g.id]={id:g.id,name:g.name,pre:0,war:0,sfak:0,fak:0,morph:0,blood:0,other:0,ebag:0,beer:0,candy:0,pts:0,refill:0});
     p.pts+=g.n;
   }
   return per;
@@ -1689,7 +1757,7 @@ function renderArmoury(){
   const per={};
   for(const a of armoury){ if(a.t<t0||a.t>t1) continue; (per[a.id]=per[a.id]||{name:a.name, evs:[]}).evs.push(a) }
   for(const r of refills){
-    const p=per[r.id]||(per[r.id]={id:r.id,name:r.name,pre:0,war:0,sfak:0,fak:0,morph:0,blood:0,other:0,pts:0,refill:0});
+    const p=per[r.id]||(per[r.id]={id:r.id,name:r.name,pre:0,war:0,sfak:0,fak:0,morph:0,blood:0,other:0,ebag:0,beer:0,candy:0,pts:0,refill:0});
     p.refill++;
   }
   for(const g of ptsGiven){ if(g.t<t0||g.t>t1) continue;
@@ -1836,6 +1904,9 @@ const HARM_COLS=[
   {k:"fak",   label:"First aid",      css:"--it-fak"},
   {k:"morph", label:"Morphine",       css:"--it-morph"},
   {k:"blood", label:"Blood bags",     css:"--it-blood"},
+  {k:"ebag",  label:"Bags filled",    css:"--it-ebag"},
+  {k:"beer",  label:"Beer",           css:"--it-beer"},
+  {k:"candy", label:"Candy",          css:"--it-candy"},
   {k:"other", label:"Other",          css:"--it-other"},
   {k:"pts",   label:"Faction points", css:"--it-pts"}
 ];
@@ -1869,7 +1940,7 @@ async function loadHomeArm(){
     const gifts=await fetchNewsRange("giveFunds", from, to, 10);
     const evs=[];
     for(const n of acts){
-      const m=ARM_RE.exec(n.text||"");
+      const m=ARM_RE.exec(n.text||"") || FILL_RE.exec(n.text||"");
       if(m) evs.push({t:n.timestamp, id:+m[1], name:m[2], item:m[3].trim(), cls:armClass(m[3])});
       else { const rf=/refill/i.test(n.text||"") && REFILL_RE.exec(n.text||"");
              if(rf) evs.push({t:n.timestamp, id:+rf[1], name:rf[2], item:rf[3].replace(/<[^>]+>/g,"").trim(), cls:"refill"}) }
@@ -1894,7 +1965,7 @@ function renderHomeArm(){
   const X=t=>100*(t-from)/span;
   const per={};
   for(const e of evs){
-    const p=per[e.id]||(per[e.id]={id:e.id, name:e.name, evs:[], xan:0,sfak:0,fak:0,morph:0,blood:0,other:0,pts:0,refill:0});
+    const p=per[e.id]||(per[e.id]={id:e.id, name:e.name, evs:[], xan:0,sfak:0,fak:0,morph:0,blood:0,other:0,ebag:0,beer:0,candy:0,pts:0,refill:0});
     p.evs.push(e);
     if(e.cls==="pts") p.pts+=e.pts||0; else p[e.cls]=(p[e.cls]||0)+1;
   }
@@ -2099,6 +2170,120 @@ $("payCsv").onclick=()=>{
   URL.revokeObjectURL(u);
 };
 
+/* ---------- dashboard tabs ---------- */
+const TABS={ war:["warpick"], faction:["homeCard","homeArmCard"], oc:["ocCard"] };
+let dashTab = "war";
+function showTab(t){
+  dashTab = TABS[t]? t : "war";
+  cfg.dashTab = dashTab; save(LS.cfg,cfg);
+  for(const b of $("dashTabs").querySelectorAll("button")) b.className = b.dataset.tab===dashTab? "on":"";
+  for(const [k,ids] of Object.entries(TABS))
+    for(const id of ids) $(id).hidden = (k!==dashTab);
+  if(dashTab==="faction"){ if(!homeRows) loadHome(); if(!homeArm) loadHomeArm() }
+  if(dashTab==="oc" && !ocData) loadOC();
+  window.scrollTo(0,0);
+}
+$("dashTabs").addEventListener("click",e=>{ const b=e.target.closest("button[data-tab]"); if(b) showTab(b.dataset.tab) });
+
+/* ---------- organised crime ----------
+   /faction/crimes gives finished crimes with their rewards and, per slot, who
+   filled it and how they did. Money is reported for the crime as a whole along
+   with the percentage leadership paid out, so each member's share is that
+   percentage split across the filled slots — what they should have been paid,
+   rather than our guess at a fair split. */
+let ocData=null, ocSort={k:"pay",dir:-1}, ocShowCrimes=false;
+const OC_COLS=[
+  {k:"name", label:"Member", left:true},
+  {k:"n",    label:"Crimes"},
+  {k:"ok",   label:"Success"},
+  {k:"fail", label:"Failed"},
+  {k:"rate", label:"Rate", fmt:r=>r.n? Math.round(100*r.ok/r.n)+"%" : "–"},
+  {k:"resp", label:"Respect"},
+  {k:"pay",  label:"Payout share", fmt:r=>"$"+fmtNum(r.pay)}
+];
+async function loadOC(){
+  const btn=$("ocLoad"); btn.disabled=true; $("ocProg").textContent="loading…";
+  try{
+    const limit=+$("ocN").value||50;
+    const r=await api("/faction/crimes",{cat:"completed", limit});
+    const crimes=(r.crimes||[]).filter(c=>c.status==="Successful"||c.status==="Failure");
+    const per={};
+    let money=0, respect=0, ok=0;
+    for(const c of crimes){
+      const rew=c.rewards||{}; const pct=(rew.payout&&rew.payout.percentage)||0;
+      const filled=(c.slots||[]).filter(s=>s.user&&s.user.id);
+      const share = filled.length? Math.round(((rew.money||0)*pct/100)/filled.length) : 0;
+      if(c.status==="Successful"){ ok++; money+=rew.money||0; respect+=rew.respect||0 }
+      for(const sl of filled){
+        const id=sl.user.id;
+        const p=per[id]||(per[id]={id, name:(memberDir[id]&&memberDir[id].name)||("["+id+"]"),
+                                   n:0, ok:0, fail:0, resp:0, pay:0, roles:{}});
+        p.n++;
+        if(c.status==="Successful"){ p.ok++; p.pay+=share; p.resp+=Math.round((rew.respect||0)/filled.length) }
+        else p.fail++;
+        p.roles[sl.position]=(p.roles[sl.position]||0)+1;
+      }
+    }
+    ocData={crimes, per:Object.values(per), money, respect, ok, n:crimes.length, at:now()};
+    $("ocProg").textContent="";
+    renderOC();
+  }catch(e){ $("ocProg").textContent=e.message }
+  finally{ btn.disabled=false }
+}
+function renderOC(){
+  if(!ocData){
+    $("octblBody").innerHTML=`<tr><td colspan="7" class="meta">Press Load to pull recent crimes.</td></tr>`;
+    $("ocHead").innerHTML=""; $("octblFoot").innerHTML=""; $("ocTotals").innerHTML=""; $("ocMeta").textContent=""; return;
+  }
+  const d=ocData, rate=d.n? Math.round(100*d.ok/d.n):0;
+  $("ocMeta").textContent=`${d.n} completed · loaded ${ago(d.at)}`;
+  $("ocTotals").innerHTML=
+      `<div class="octile"><b class="${rate>=70?"pos":rate>=50?"":"neg"}">${rate}%</b><span>success rate</span></div>`
+    + `<div class="octile"><b>${d.ok}/${d.n}</b><span>successful</span></div>`
+    + `<div class="octile"><b class="pos">$${fmtNum(d.money)}</b><span>money earned</span></div>`
+    + `<div class="octile"><b style="color:var(--amber)">${fmtNum(d.respect)}</b><span>respect</span></div>`;
+  $("ocHead").innerHTML=OC_COLS.map(c=>
+    `<th data-k="${c.k}" class="${ocSort.k===c.k?"sorted":""}" style="${c.left?"text-align:left":""}">${c.label}</th>`).join("");
+  const rows=[...d.per].sort((a,b)=>{
+    const va=a[ocSort.k]??0, vb=b[ocSort.k]??0;
+    if(ocSort.k==="rate"){ const ra=a.n?a.ok/a.n:0, rb=b.n?b.ok/b.n:0; return (ra-rb)*ocSort.dir }
+    return (typeof va==="string"? va.localeCompare(vb) : va-vb)*ocSort.dir;
+  });
+  $("octblBody").innerHTML = rows.length? rows.map(r=>{
+    const pct=r.n? Math.round(100*r.ok/r.n):0;
+    return `<tr><td style="text-align:left" class="name" title="${esc(Object.entries(r.roles).map(([k,v])=>k+" ×"+v).join(", "))}">${esc(r.name)}</td>`
+      + `<td>${r.n}</td><td class="pos">${r.ok}</td><td class="${r.fail?"neg":"zero"}">${r.fail||"–"}</td>`
+      + `<td class="${pct>=70?"pos":pct>=50?"":"neg"}">${pct}%</td>`
+      + `<td style="color:var(--amber)">${fmtNum(r.resp)}</td>`
+      + `<td class="pos"><b>$${fmtNum(r.pay)}</b></td></tr>`;
+  }).join("") : `<tr><td colspan="7" class="meta">Nobody in the completed crimes yet.</td></tr>`;
+  const S=k=>rows.reduce((x,r)=>x+(r[k]||0),0);
+  $("octblFoot").innerHTML=`<td style="text-align:left">Total</td><td>${S("n")}</td><td>${S("ok")}</td><td>${S("fail")}</td><td></td>`
+    + `<td style="color:var(--amber)">${fmtNum(S("resp"))}</td><td class="pos"><b>$${fmtNum(S("pay"))}</b></td>`;
+  $("ocCrimesWrap").hidden=!ocShowCrimes;
+  $("ocToggle").textContent = ocShowCrimes? "Hide individual crimes" : "Show each crime";
+  if(ocShowCrimes) $("occtblBody").innerHTML = d.crimes.map(c=>{
+    const rew=c.rewards||{}, filled=(c.slots||[]).filter(s=>s.user&&s.user.id);
+    const team=filled.map(s=>(memberDir[s.user.id]&&memberDir[s.user.id].name)||s.user.id).join(", ");
+    const win=c.status==="Successful";
+    return `<tr><td style="text-align:left">${esc(c.name)}</td><td>${c.difficulty??"–"}</td>`
+      + `<td style="text-align:left" class="meta">${c.executed_at? fmtDT(c.executed_at):"–"}</td>`
+      + `<td style="text-align:left" class="${win?"pos":"neg"}">${win?"success":"failed"}</td>`
+      + `<td class="${win?"pos":"zero"}">${win? "$"+fmtNum(rew.money||0):"–"}</td>`
+      + `<td style="color:var(--amber)">${win? fmtNum(rew.respect||0):"–"}</td>`
+      + `<td style="text-align:left" class="meta">${esc(team)}</td></tr>`;
+  }).join("");
+}
+$("ocLoad").onclick=loadOC;
+$("ocN").onchange=()=>{ if(ocData) loadOC() };
+$("ocToggle").onclick=()=>{ ocShowCrimes=!ocShowCrimes; renderOC() };
+$("ocHead").addEventListener("click",e=>{
+  const th=e.target.closest("th[data-k]"); if(!th) return;
+  const k=th.dataset.k;
+  ocSort = ocSort.k===k? {k, dir:-ocSort.dir} : {k, dir: k==="name"? 1 : -1};
+  renderOC();
+});
+
 /* ---------- csv ---------- */
 $("csvBtn").onclick=()=>{
   const rows=aggregate(scrubT);
@@ -2132,10 +2317,7 @@ $("switchWar").onclick = async ()=>{
     $("resumeWar").hidden=false;
     $("resumeWar").textContent = "Continue tracking " + (wasTracking.oppName||"last war") + " ⟶";
   }
-  $("warpick").hidden=false; $("homeCard").hidden=false; $("homeArmCard").hidden=false;
-  renderHome(); renderHomeArm();
-  if(!homeRows) loadHome();
-  if(!homeArm) loadHomeArm();
+  $("dashTabs").hidden=false; renderHome(); renderHomeArm(); renderOC(); showTab(cfg.dashTab||dashTab);
   window.scrollTo({top:0});
 };
 
@@ -2342,8 +2524,8 @@ function tsToLocalInput(t){ return new Date(t*1000).toISOString().slice(0,16) }
       $("resumeWar").textContent = "Continue tracking " + (war.oppName||"last war") + " ⟶";
     }
     loadWarList()
-      .then(()=>{ $("warpick").hidden=false; $("homeCard").hidden=false; $("homeArmCard").hidden=false;
-                  renderHome(); renderHomeArm(); loadHome(); loadHomeArm(); })
+      .then(()=>{ $("dashTabs").hidden=false; renderHome(); renderHomeArm(); renderOC();
+                  showTab(cfg.dashTab||dashTab); })
       .catch(e=>{ $("setup").hidden=false; showErr(e.message) });
   }
 })();
