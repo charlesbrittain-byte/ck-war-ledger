@@ -413,21 +413,28 @@ details.settings summary{cursor:pointer}
     <div class="meta" id="ocMeta"></div>
   </div>
   <div class="zoomrow">
-    <span class="lbl">Last</span>
-    <button data-ocd="3">3d</button>
-    <button data-ocd="7">7d</button>
-    <button data-ocd="14">14d</button>
-    <button data-ocd="30" class="on">30d</button>
-    <button data-ocd="90">90d</button>
+    <span class="lbl">From</span>
+    <input type="date" id="ocFrom">
+    <span class="lbl">to</span>
+    <input type="date" id="ocTo">
+    <button id="ocReset" title="Back to the last 90 days">90d</button>
     <span class="gap"></span>
+    <span class="lbl">Smooth</span>
+    <select id="ocSmooth" style="padding:4px 8px">
+      <option value="1">off</option>
+      <option value="7" selected>7-day average</option>
+      <option value="14">14-day average</option>
+    </select>
     <button id="ocLoad" class="primary">Reload</button>
     <span class="meta" id="ocProg"></span>
   </div>
+  <div class="row" id="ocTrend" style="margin-top:10px; gap:18px"></div>
   <div class="row" id="ocTotals" style="margin-top:12px; gap:20px"></div>
   <svg id="ocChart" class="occhart" preserveAspectRatio="none"></svg>
   <div class="legend" id="ocChartLegend" hidden>
     <span><i style="background:var(--up)"></i>money per day</span>
     <span><i style="background:var(--amber)"></i>respect per day</span>
+    <span id="ocSmoothNote"></span>
   </div>
   <div class="tblwrap" style="margin-top:12px">
     <table id="octbl" style="min-width:700px">
@@ -713,7 +720,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 08:40</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 08:46</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="mback" class="modal-back">
@@ -2233,7 +2240,14 @@ $("dashTabs").addEventListener("click",e=>{ const b=e.target.closest("button[dat
    members' slice and the faction's cut separately, and give each member what
    they should actually have received. 100 completed crimes covers roughly 100
    days, which is why 90 is the longest window offered. */
-let ocRaw=null, ocDays=(cfg&&cfg.ocDays)||30, ocSort={k:"pay",dir:-1};
+let ocRaw=null, ocSort={k:"pay",dir:-1};
+const dayStr=t=>new Date(t*1000).toISOString().slice(0,10);
+const strDay=s=>Math.floor(new Date(s+"T00:00:00Z").getTime()/1000);
+function ocRange(){
+  const to = cfg.ocTo? strDay(cfg.ocTo)+86399 : now();
+  const from = cfg.ocFrom? strDay(cfg.ocFrom) : to-90*86400;
+  return {from:Math.min(from,to-86400), to};
+}
 const OC_COLS=[
   {k:"name", label:"Member", left:true},
   {k:"n",    label:"Crimes"},
@@ -2263,50 +2277,80 @@ async function loadOC(){
   finally{ btn.disabled=false }
 }
 function ocWindow(){
-  const from=now()-ocDays*86400;
-  const crimes=(ocRaw?.done||[]).filter(c=>(c.status==="Successful"||c.status==="Failure") && (c.executed_at||0)>=from);
+  const {from,to}=ocRange();
+  const crimes=(ocRaw?.done||[]).filter(c=>(c.status==="Successful"||c.status==="Failure")
+                && (c.executed_at||0)>=from && (c.executed_at||0)<=to);
   const open=(ocRaw?.live||[]).filter(c=>["Recruiting","Planning","Ready"].includes(c.status));
-  return {from, crimes, open};
+  return {from, to, crimes, open};
 }
-function drawOcChart(crimes, from){
-  const svg=$("ocChart"), W=1000, H=150, pad=22;
-  if(!crimes.length){ svg.innerHTML=""; $("ocChartLegend").hidden=true; return }
+function drawOcChart(crimes, from, to){
+  const svg=$("ocChart"), W=1000, H=170, padL=26, padR=26, padT=18, padB=26;
+  const smooth=Math.max(1, +cfg.ocSmooth||7);
+  if(!crimes.length){ svg.innerHTML=""; $("ocChartLegend").hidden=true; $("ocTrend").innerHTML=""; return }
   $("ocChartLegend").hidden=false;
+  $("ocSmoothNote").textContent = smooth>1? `${smooth}-day rolling average` : "daily totals";
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
   const day=d=>Math.floor(d/86400);
-  const d0=day(from), d1=day(now()), n=Math.max(1,d1-d0+1);
+  const d0=day(from), d1=day(to), n=Math.max(1,d1-d0+1);
   const money=new Array(n).fill(0), resp=new Array(n).fill(0);
   for(const c of crimes){
+    if(c.status!=="Successful") continue;
     const i=day(c.executed_at)-d0; if(i<0||i>=n) continue;
-    const s=ocSplit(c);
-    if(c.status==="Successful"){ money[i]+=s.money; resp[i]+=s.respect }
+    const s=ocSplit(c); money[i]+=s.money; resp[i]+=s.respect;
   }
-  const mx=Math.max(1,...money), rx=Math.max(1,...resp);
-  const X=i=>pad+(W-pad*2)*(n===1?0.5:i/(n-1));
-  const Y=(v,max)=>H-pad-(H-pad*2)*(v/max);
-  const path=(arr,max)=>arr.map((v,i)=>(i?"L":"M")+X(i).toFixed(1)+" "+Y(v,max).toFixed(1)).join(" ");
-  let p=`<line x1="${pad}" x2="${W-pad}" y1="${H-pad}" y2="${H-pad}" stroke="var(--line)"/>`;
-  p+=`<path d="${path(money,mx)}" fill="none" stroke="var(--up)" stroke-width="2.5"/>`;
-  p+=`<path d="${path(resp,rx)}" fill="none" stroke="var(--amber)" stroke-width="2.5" stroke-dasharray="5 3"/>`;
+  // trailing average: a spiky daily line says nothing about direction
+  const roll=a=>a.map((_,i)=>{
+    const lo=Math.max(0,i-smooth+1); let s=0;
+    for(let k=lo;k<=i;k++) s+=a[k];
+    return s/(i-lo+1);
+  });
+  const mS=roll(money), rS=roll(resp);
+  const mx=Math.max(1,...mS), rx=Math.max(1,...rS);
+  const X=i=>padL+(W-padL-padR)*(n===1?0.5:i/(n-1));
+  const Y=(v,max)=>H-padB-(H-padT-padB)*(v/max);
+  const line=(arr,max)=>arr.map((v,i)=>(i?"L":"M")+X(i).toFixed(1)+" "+Y(v,max).toFixed(1)).join(" ");
+  const area=(arr,max)=>`M${X(0).toFixed(1)} ${H-padB} `+arr.map((v,i)=>"L"+X(i).toFixed(1)+" "+Y(v,max).toFixed(1)).join(" ")+` L${X(n-1).toFixed(1)} ${H-padB} Z`;
+  let p=`<line x1="${padL}" x2="${W-padR}" y1="${H-padB}" y2="${H-padB}" stroke="var(--line)"/>`;
+  // month gridlines so a long range stays readable
   for(let i=0;i<n;i++){
-    if(money[i]) p+=`<circle cx="${X(i).toFixed(1)}" cy="${Y(money[i],mx).toFixed(1)}" r="3" fill="var(--up)"><title>${fmtDate(from+i*86400)}: $${fmtNum(money[i])}</title></circle>`;
-    if(resp[i]) p+=`<circle cx="${X(i).toFixed(1)}" cy="${Y(resp[i],rx).toFixed(1)}" r="3" fill="var(--amber)"><title>${fmtDate(from+i*86400)}: ${fmtNum(resp[i])} respect</title></circle>`;
+    const d=new Date((from+i*86400)*1000);
+    if(d.getUTCDate()===1) p+=`<line x1="${X(i).toFixed(1)}" x2="${X(i).toFixed(1)}" y1="${padT}" y2="${H-padB}" stroke="var(--line)" stroke-dasharray="2 4"/>`;
   }
-  p+=`<text x="${pad}" y="${H-6}" fill="var(--faint)" font-size="11">${fmtDate(from)}</text>`;
-  p+=`<text x="${W-pad}" y="${H-6}" fill="var(--faint)" font-size="11" text-anchor="end">today</text>`;
-  p+=`<text x="${pad}" y="14" fill="var(--up)" font-size="11">peak $${fmtNum(mx)}</text>`;
-  p+=`<text x="${W-pad}" y="14" fill="var(--amber)" font-size="11" text-anchor="end">peak ${fmtNum(rx)} respect</text>`;
+  p+=`<path d="${area(mS,mx)}" fill="var(--up)" opacity=".10"/>`;
+  p+=`<path d="${line(mS,mx)}" fill="none" stroke="var(--up)" stroke-width="2.5" stroke-linejoin="round"/>`;
+  p+=`<path d="${line(rS,rx)}" fill="none" stroke="var(--amber)" stroke-width="2.5" stroke-dasharray="5 3" stroke-linejoin="round"/>`;
+  p+=`<text x="${padL}" y="${H-7}" fill="var(--faint)" font-size="11">${fmtDate(from)}</text>`;
+  p+=`<text x="${W-padR}" y="${H-7}" fill="var(--faint)" font-size="11" text-anchor="end">${fmtDate(to)}</text>`;
+  p+=`<text x="${padL}" y="13" fill="var(--up)" font-size="11">peak $${fmtNum(Math.round(mx))}/day</text>`;
+  p+=`<text x="${W-padR}" y="13" fill="var(--amber)" font-size="11" text-anchor="end">peak ${Math.round(rx)} respect/day</text>`;
   svg.innerHTML=p;
+
+  // direction: first half of the window against the second
+  const half=Math.floor(n/2) || 1;
+  const avg=(a,lo,hi)=>{ let s=0; for(let i=lo;i<hi;i++) s+=a[i]; return (hi-lo)? s/(hi-lo) : 0 };
+  const tile=(label, a, fmt)=>{
+    const was=avg(a,0,half), is=avg(a,half,n);
+    const d = was? Math.round(100*(is-was)/was) : (is? 100 : 0);
+    const cls = d>5? "pos" : d<-5? "neg" : "";
+    const arrow = d>5? "▲" : d<-5? "▼" : "▬";
+    return `<div class="octile"><b class="${cls}">${arrow} ${d>0?"+":""}${d}%</b>`
+         + `<span>${label} · ${fmt(was)} → ${fmt(is)}</span></div>`;
+  };
+  $("ocTrend").innerHTML =
+      tile("money per day", mS, v=>"$"+fmtNum(Math.round(v)))
+    + tile("respect per day", rS, v=>fmtNum(Math.round(v)));
 }
 function renderOC(){
-  for(const b of document.querySelectorAll("[data-ocd]")) b.className = (+b.dataset.ocd===ocDays)? "on":"";
+  const rg=ocRange();
+  $("ocFrom").value=dayStr(rg.from); $("ocTo").value=dayStr(rg.to);
+  $("ocSmooth").value=String(cfg.ocSmooth||7);
   if(!ocRaw){
     $("octblBody").innerHTML=`<tr><td colspan="7" class="meta">Loading…</td></tr>`;
     $("ocHead").innerHTML=""; $("octblFoot").innerHTML=""; $("ocTotals").innerHTML=""; $("ocMeta").textContent="";
     $("octptblBody").innerHTML=""; $("octytblBody").innerHTML=""; return;
   }
-  const {from, crimes, open}=ocWindow();
-  const days=Math.max(1,ocDays);
+  const {from, to, crimes, open}=ocWindow();
+  const days=Math.max(1, Math.round((to-from)/86400));
   let money=0, members=0, faction=0, respect=0, ok=0;
   const per={}, byType={};
   for(const c of crimes){
@@ -2328,14 +2372,16 @@ function renderOC(){
   }
   const rate=crimes.length? Math.round(100*ok/crimes.length):0;
   const perDay=v=>"≈"+fmtNum(Math.round(v/days))+"/day";
-  $("ocMeta").textContent=`${fmtDate(from)} → today · loaded ${ago(ocRaw.at)}`;
+  const held=(ocRaw.done||[]).map(c=>c.executed_at).filter(Boolean).sort((a,b)=>a-b)[0];
+  $("ocMeta").textContent=`${fmtDate(from)} → ${fmtDate(to)} · ${days} days · loaded ${ago(ocRaw.at)}`
+    + (held && held>from+86400? ` · history starts ${fmtDate(held)}` : "");
   $("ocTotals").innerHTML=
       `<div class="octile"><b>${crimes.length}</b><span>crimes · <span class="pos">${ok}</span>/<span class="neg">${crimes.length-ok}</span> · ${rate}%</span></div>`
     + `<div class="octile"><b style="color:var(--amber)">${fmtNum(respect)}</b><span>respect · ${perDay(respect)}</span></div>`
     + `<div class="octile"><b class="pos">$${fmtNum(members)}</b><span>to members · ${perDay(members)}</span></div>`
     + `<div class="octile"><b style="color:var(--steel)">$${fmtNum(faction)}</b><span>to faction · ${perDay(faction)}</span></div>`
     + `<div class="octile"><b>$${fmtNum(money)}</b><span>grand total · ${perDay(money)}</span></div>`;
-  drawOcChart(crimes, from);
+  drawOcChart(crimes, from, to);
 
   $("ocHead").innerHTML=OC_COLS.map(c=>
     `<th data-k="${c.k}" class="${ocSort.k===c.k?"sorted":""}" style="${c.left?"text-align:left":""}">${c.label}</th>`).join("");
@@ -2370,7 +2416,7 @@ function renderOC(){
     return {id, name:md.name||("["+id+"]"), n:p.n, last:p.last, now:inNow[id], newish, role:role?role[0]:null};
   }).sort((a,b)=> a.n-b.n || (b.last||0)-(a.last||0));
   const idle=part.filter(p=>!p.n && !p.now).length;
-  $("ocPartMeta").textContent=`${part.length} members · ${idle} with nothing in ${ocDays} days`;
+  $("ocPartMeta").textContent=`${part.length} members · ${idle} with nothing in this range`;
   $("octptblBody").innerHTML=part.map(p=>
     `<tr><td style="text-align:left" class="name">${esc(p.name)}${p.newish?' <span class="meta">(new)</span>':""}</td>`
     + `<td class="${p.n?"pos":"neg"}"><b>${p.n}</b></td>`
@@ -2394,10 +2440,11 @@ function renderOC(){
     + `<td style="color:var(--amber)">${fmtNum(T2("resp"))}</td><td class="pos">$${fmtNum(T2("money"))}</td><td style="color:var(--steel)">$${fmtNum(T2("faction"))}</td>`;
 }
 $("ocLoad").onclick=loadOC;
-document.addEventListener("click",e=>{
-  const b=e.target.closest("[data-ocd]"); if(!b) return;
-  ocDays=+b.dataset.ocd; cfg.ocDays=ocDays; save(LS.cfg,cfg); renderOC();
-});
+for(const id of ["ocFrom","ocTo"]) $(id).onchange=()=>{
+  cfg.ocFrom=$("ocFrom").value; cfg.ocTo=$("ocTo").value; save(LS.cfg,cfg); renderOC();
+};
+$("ocSmooth").onchange=()=>{ cfg.ocSmooth=+$("ocSmooth").value||7; save(LS.cfg,cfg); renderOC() };
+$("ocReset").onclick=()=>{ cfg.ocFrom=""; cfg.ocTo=""; save(LS.cfg,cfg); renderOC() };
 $("ocHead").addEventListener("click",e=>{
   const th=e.target.closest("th[data-k]"); if(!th) return;
   const k=th.dataset.k;
