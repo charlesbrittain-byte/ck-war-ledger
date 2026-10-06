@@ -134,6 +134,13 @@ th{color:var(--faint); font-weight:700; font-size:12.5px; letter-spacing:.06em; 
 th.sorted{color:var(--amber)}
 .mobonly{display:none}
 .nowrap{white-space:nowrap}
+/* line the slashes up down the column, and hold the rate clear of them */
+.rec{display:flex; align-items:baseline; justify-content:flex-end; white-space:nowrap}
+.rec .w{min-width:2.4em; text-align:right}
+.rec .sl{color:var(--faint); padding:0 .25em}
+.rec .l{min-width:2.4em; text-align:left}
+.rec .pc{min-width:3.6em; text-align:right; margin-left:14px}
+.warn{color:var(--amber)}
 td.ocjump{cursor:pointer}
 td.ocjump:hover{color:var(--amber)}
 .sortsub{cursor:pointer}
@@ -243,11 +250,12 @@ details.settings summary{cursor:pointer}
   #mdtbl th:nth-child(2), #mdtbl td:nth-child(2),
   #mdtbl th:nth-child(5), #mdtbl td:nth-child(5),
   #mdtbl th:nth-child(6), #mdtbl td:nth-child(6){display:none}
-  /* OC member table: days-in and respect are the extras next to record, idle and payout */
-  #octbl th:nth-child(4), #octbl td:nth-child(4),
-  #octbl th:nth-child(6), #octbl td:nth-child(6){display:none}
-  /* the per-member crime popup: role matters least on a phone */
-  #ocmtbl th:nth-child(4), #ocmtbl td:nth-child(4){display:none}
+  /* OC member table (Member, Crimes, Record, Chance, Days in, Idle, Respect, Payout):
+     drop days-in and respect, keep chance and idle — those are the ones acted on */
+  #octbl th:nth-child(5), #octbl td:nth-child(5),
+  #octbl th:nth-child(7), #octbl td:nth-child(7){display:none}
+  /* per-member popup (Crime, Level, Chance, Ran, Role, Result, Payout): role goes */
+  #ocmtbl th:nth-child(5), #ocmtbl td:nth-child(5){display:none}
   /* participation: the role they usually fill is the least urgent column */
   #octptbl th:nth-child(5), #octptbl td:nth-child(5){display:none}
   /* by crime: difficulty and the faction slice */
@@ -265,7 +273,10 @@ details.settings summary{cursor:pointer}
   #wartbl th:nth-child(6), #wartbl td:nth-child(6){display:none}
   #wartbl td.name{max-width:none; white-space:normal}
   /* long names get an ellipsis rather than forcing the table wider */
-  td.name{max-width:104px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  td.name{max-width:92px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .rec .w,.rec .l{min-width:1.5em}
+  .rec .sl{padding:0 .15em}
+  .rec .pc{min-width:2.5em; margin-left:6px}
   /* member popup: drop assists and average fair fight */
   #mtbl th:nth-child(3), #mtbl td:nth-child(3),
   #mtbl th:nth-child(8), #mtbl td:nth-child(8){display:none}
@@ -283,6 +294,7 @@ details.settings summary{cursor:pointer}
   .h-ag{display:none}
   #octytbl th:nth-child(6), #octytbl td:nth-child(6){display:none}   /* respect, on by-crime */
   #octbl th:nth-child(2), #octbl td:nth-child(2){display:none}       /* crime count: the record implies it */
+  #ocmtbl th:nth-child(4), #ocmtbl td:nth-child(4){display:none}     /* popup date: the list is newest first */
 }
 @media (prefers-reduced-motion:reduce){ *{transition:none!important; animation:none!important} }
 </style>
@@ -468,7 +480,7 @@ details.settings summary{cursor:pointer}
       <tbody id="octptblBody"></tbody>
     </table>
   </div>
-  <p class="hint">Everyone on the roster, slackers first. "In one now" counts crimes still recruiting or planning, so someone who has joined the next one is not chased for the last one. Members who joined the faction inside the window are marked, since they cannot have joined crimes that ran before they arrived.</p>
+  <p class="hint">Everyone on the roster, slackers first. "In one now" counts crimes still recruiting or planning, so someone who has joined the next one is not chased for the last one. Members who joined the faction inside the window are marked, since they cannot have joined crimes that ran before they arrived. The percentage beside a current crime is their chance in that slot — green at 65 and over, amber to 55, red below — so a bad fit can be swapped before it runs.</p>
 </section>
 
 <!-- OC BY CRIME -->
@@ -730,7 +742,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 08:57</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-06 09:10</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -742,7 +754,7 @@ details.settings summary{cursor:pointer}
     <div class="row" id="ocmTiles" style="margin:10px 0; gap:18px"></div>
     <div class="tblwrap">
       <table id="ocmtbl" style="min-width:560px">
-        <thead><tr><th style="text-align:left">Crime</th><th>Level</th><th style="text-align:left">Ran</th><th style="text-align:left">Role</th><th style="text-align:left">Result</th><th>Payout</th></tr></thead>
+        <thead><tr><th style="text-align:left">Crime</th><th>Level</th><th>Chance</th><th style="text-align:left">Ran</th><th style="text-align:left">Role</th><th style="text-align:left">Result</th><th>Payout</th></tr></thead>
         <tbody id="ocmtblBody"></tbody>
       </table>
     </div>
@@ -2279,11 +2291,25 @@ const OC_COLS=[
   {k:"name",   label:"Member", left:true},
   {k:"n",      label:"Crimes"},
   {k:"rate",   label:"Won / lost"},
+  {k:"pass",   label:"Avg chance"},
   {k:"inDays", label:"Days in"},
   {k:"idle",   label:"Days idle"},
   {k:"resp",   label:"Respect"},
   {k:"pay",    label:"Payout share"}
 ];
+const narrow=()=>window.matchMedia("(max-width:640px)").matches && !document.body.classList.contains("cols-all");
+// $107,100,000 does not fit a phone column; $107.1m does and reads the same
+function fmtCash(v){
+  v=Math.round(v||0);
+  if(!narrow()) return "$"+fmtNum(v);
+  const a=Math.abs(v);
+  if(a>=1e9) return "$"+(v/1e9).toFixed(a>=1e10?0:1)+"b";
+  if(a>=1e6) return "$"+(v/1e6).toFixed(a>=1e8?0:1)+"m";
+  if(a>=1e3) return "$"+(v/1e3).toFixed(0)+"k";
+  return "$"+v;
+}
+function passCls(v){ return v==null? "zero" : v>=65? "pos" : v>=55? "warn" : "neg" }
+function passCell(v){ return `<td class="${passCls(v)}">${v==null? "–" : Math.round(v)+"%"}</td>` }
 function ocSplit(c){
   const rew=c.rewards||{}, money=rew.money||0;
   const pct=(rew.payout&&rew.payout.percentage)||0;
@@ -2420,9 +2446,11 @@ function renderOC(){
       // every day between joining and the crime running counts as "in a crime"
       const a=Math.max(from, sl.user.joined_at||c.executed_at), b=Math.min(to, c.executed_at||now());
       for(let d=Math.floor(a/86400); d<=Math.floor(b/86400); d++) p.days.add(d);
+      const pass = sl.checkpoint_pass_rate ?? null;
+      if(pass!=null){ p.passSum=(p.passSum||0)+pass; p.passN=(p.passN||0)+1 }
       p.list.push({name:c.name, diff:c.difficulty, t:c.executed_at, win, role:sl.position,
                    pay:win? share:0, resp:win? Math.round(s.respect/filled.length):0,
-                   team:filled.length, progress:sl.user.progress??null});
+                   team:filled.length, progress:sl.user.progress??null, pass});
     }
   }
   const rate=crimes.length? Math.round(100*ok/crimes.length):0;
@@ -2440,7 +2468,7 @@ function renderOC(){
 
   $("ocHead").innerHTML=OC_COLS.map(c=>
     `<th data-k="${c.k}" class="${ocSort.k===c.k?"sorted":""}" style="${c.left?"text-align:left":""}">${c.label}</th>`).join("");
-  for(const p of Object.values(per)){ p.inDays=p.days.size; p.idle=Math.max(0, days-p.inDays) }
+  for(const p of Object.values(per)){ p.inDays=p.days.size; p.idle=Math.max(0, days-p.inDays); p.pass=p.passN? p.passSum/p.passN : null }
   const rows=Object.values(per).sort((a,b)=>{
     if(ocSort.k==="rate"){ const ra=a.n?a.ok/a.n:0, rb=b.n?b.ok/b.n:0; return (ra-rb)*ocSort.dir }
     const va=a[ocSort.k]??0, vb=b[ocSort.k]??0;
@@ -2451,18 +2479,23 @@ function renderOC(){
     const idlePct=days? r.idle/days : 0;
     return `<tr><td style="text-align:left" class="name ocjump" data-oid="${r.id}" title="Click for every crime they joined">${esc(r.name)}</td>`
       + `<td>${r.n}</td>`
-      + `<td class="nowrap"><span class="pos">${r.ok}</span><span class="meta"> / </span><span class="${r.fail?"neg":"zero"}">${r.fail}</span>`
-        + ` <span class="${pct>=70?"pos":pct>=50?"":"neg"}">${pct}%</span></td>`
+      + `<td><span class="rec"><span class="w pos">${r.ok}</span><span class="sl">/</span>`
+        + `<span class="l ${r.fail?"neg":"zero"}">${r.fail}</span>`
+        + `<span class="pc ${pct>=70?"pos":pct>=50?"":"neg"}">${pct}%</span></span></td>`
+      + passCell(r.pass)
       + `<td>${r.inDays}</td>`
       + `<td class="${idlePct>0.5?"neg":idlePct>0.25?"":"zero"}">${r.idle}</td>`
       + `<td style="color:var(--amber)">${fmtNum(r.resp)}</td>`
-      + `<td class="pos"><b>$${fmtNum(r.pay)}</b></td></tr>`;
+      + `<td class="pos"><b>${fmtCash(r.pay)}</b></td></tr>`;
   }).join("") : `<tr><td colspan="7" class="meta">No completed crimes in this window.</td></tr>`;
   const S=k=>rows.reduce((x,r)=>x+(r[k]||0),0);
+  const passAll=rows.filter(r=>r.pass!=null);
   $("octblFoot").innerHTML=`<td style="text-align:left">Total</td><td>${S("n")}</td>`
-    + `<td class="nowrap"><span class="pos">${S("ok")}</span><span class="meta"> / </span><span class="neg">${S("fail")}</span></td>`
+    + `<td><span class="rec"><span class="w pos">${S("ok")}</span><span class="sl">/</span>`
+      + `<span class="l neg">${S("fail")}</span><span class="pc"></span></span></td>`
+    + passCell(passAll.length? passAll.reduce((x,r)=>x+r.pass,0)/passAll.length : null)
     + `<td></td><td></td>`
-    + `<td style="color:var(--amber)">${fmtNum(S("resp"))}</td><td class="pos"><b>$${fmtNum(S("pay"))}</b></td>`;
+    + `<td style="color:var(--amber)">${fmtNum(S("resp"))}</td><td class="pos"><b>${fmtCash(S("pay"))}</b></td>`;
   ocPer=per;
   $("ocHint").innerHTML = `Completed crimes only. <b>Click a name</b> for every crime they joined, with its level — useful when someone's fail rate looks off. `
     + `<b>Days idle</b> is days in this range they were in no crime at all, waiting or running; that is the number to chase. `
@@ -2472,7 +2505,7 @@ function renderOC(){
   // who is joining
   const inNow={};
   for(const c of open) for(const sl of (c.slots||[])) if(sl.user&&sl.user.id){
-    inNow[sl.user.id]={name:c.name, status:c.status};
+    inNow[sl.user.id]={name:c.name, status:c.status, pass:sl.checkpoint_pass_rate ?? null, role:sl.position};
     const p=per[sl.user.id];
     if(p) for(let d=Math.floor(Math.max(from, sl.user.joined_at||now())/86400); d<=Math.floor(to/86400); d++) p.days.add(d);
   }
@@ -2490,7 +2523,8 @@ function renderOC(){
     `<tr><td style="text-align:left" class="name">${esc(p.name)}${p.newish?' <span class="meta">(new)</span>':""}</td>`
     + `<td class="${p.n?"pos":"neg"}"><b>${p.n}</b></td>`
     + `<td style="text-align:left" class="meta">${p.last? fmtDate(p.last)+" · "+ago(p.last) : "—"}</td>`
-    + `<td style="text-align:left" class="${p.now?"pos":"zero"}">${p.now? esc(p.now.name)+" ("+p.now.status.toLowerCase()+")" : "—"}</td>`
+    + `<td style="text-align:left" class="${p.now?"pos":"zero"}">${p.now? esc(p.now.name)+" ("+p.now.status.toLowerCase()+")"
+        + (p.now.pass!=null? ` <b class="${passCls(p.now.pass)}">${Math.round(p.now.pass)}%</b>`:"") : "—"}</td>`
     + `<td style="text-align:left" class="meta">${p.role? esc(p.role):"—"}</td></tr>`).join("");
 
   // by crime
@@ -2502,11 +2536,11 @@ function renderOC(){
       + `<td style="text-align:left"><span class="pos">${t.ok}</span> / <span class="${t.n-t.ok?"neg":"zero"}">${t.n-t.ok}</span></td>`
       + `<td class="${pct>=70?"pos":pct>=50?"":"neg"}">${pct}%</td>`
       + `<td style="color:var(--amber)">${fmtNum(t.resp)}</td>`
-      + `<td class="pos">$${fmtNum(t.money)}</td><td style="color:var(--steel)">$${fmtNum(t.faction)}</td></tr>`;
+      + `<td class="pos">${fmtCash(t.money)}</td><td style="color:var(--steel)">${fmtCash(t.faction)}</td></tr>`;
   }).join("") || `<tr><td colspan="8" class="meta">Nothing in this window.</td></tr>`;
   const T2=k=>types.reduce((x,t)=>x+(t[k]||0),0);
   $("octytblFoot").innerHTML=`<td style="text-align:left">Total</td><td></td><td>${T2("n")}</td><td></td><td></td>`
-    + `<td style="color:var(--amber)">${fmtNum(T2("resp"))}</td><td class="pos">$${fmtNum(T2("money"))}</td><td style="color:var(--steel)">$${fmtNum(T2("faction"))}</td>`;
+    + `<td style="color:var(--amber)">${fmtNum(T2("resp"))}</td><td class="pos">${fmtCash(T2("money"))}</td><td style="color:var(--steel)">${fmtCash(T2("faction"))}</td>`;
 }
 
 function openOcMember(id){
@@ -2521,21 +2555,25 @@ function openOcMember(id){
       `<div class="octile"><b>${r.n}</b><span>crimes joined</span></div>`
     + `<div class="octile"><b class="${pct>=70?"pos":pct>=50?"":"neg"}">${pct}%</b><span>${r.ok} won · ${r.fail} lost</span></div>`
     + `<div class="octile"><b>${r.inDays}<span class="meta" style="font-size:13px"> / ${r.inDays+r.idle}</span></b><span>days in a crime</span></div>`
-    + `<div class="octile"><b class="pos">$${fmtNum(r.pay)}</b><span>payout share</span></div>`;
+    + `<div class="octile"><b class="${passCls(r.pass)}">${r.pass==null? "–" : Math.round(r.pass)+"%"}</b><span>average chance</span></div>`
+    + `<div class="octile"><b class="pos">${fmtCash(r.pay)}</b><span>payout share</span></div>`;
   $("ocmtblBody").innerHTML = [...r.list].sort((a,b)=>b.t-a.t).map(c=>
       `<tr><td style="text-align:left">${esc(c.name)}</td>`
     + `<td class="lvl">${c.diff??"–"}</td>`
+    + passCell(c.pass)
     + `<td style="text-align:left" class="meta">${c.t? fmtDate(c.t):"–"}</td>`
     + `<td style="text-align:left" class="meta">${esc(c.role||"–")}</td>`
     + `<td style="text-align:left" class="${c.win?"pos":"neg"}">${c.win?"won":"lost"}</td>`
-    + `<td class="${c.win?"pos":"zero"}">${c.win? "$"+fmtNum(c.pay):"–"}</td></tr>`).join("")
-    || `<tr><td colspan="6" class="meta">Nothing in this range.</td></tr>`;
+    + `<td class="${c.win?"pos":"zero"}">${c.win? fmtCash(c.pay):"–"}</td></tr>`).join("")
+    || `<tr><td colspan="7" class="meta">Nothing in this range.</td></tr>`;
   const levels=Object.entries(byDiff).sort((a,b)=>a[0]-b[0])
     .map(([d,v])=>`level ${d}: ${v.ok}/${v.n}`).join(" · ");
+  const low=r.list.filter(c=>c.pass!=null && c.pass<65).length;
   $("ocmHint").innerHTML = (levels? `By level — ${levels}. ` : "")
     + (worst && worst[1].ok/worst[1].n < 0.6
         ? `<b>Level ${worst[0]} is where it goes wrong</b> (${worst[1].ok} of ${worst[1].n}). Higher levels fail more for everyone, so check whether they are being put in crimes above their skill before reading anything into the overall rate.`
-        : `A crime's level drives how often it fails, so compare like with like before judging a rate.`);
+        : `A crime's level drives how often it fails, so compare like with like before judging a rate.`)
+    + (low? ` They went in <b>under 65%</b> on ${low} of ${r.list.length} slots — a low chance going in explains a poor record better than the player does.` : "");
   $("ocback").style.display="block";
 }
 $("ocmClose").onclick=()=>{ $("ocback").style.display="none" };
