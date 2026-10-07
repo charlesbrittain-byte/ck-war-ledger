@@ -451,6 +451,27 @@ details.settings summary{cursor:pointer}
   </div>
 </section>
 
+<!-- CLUBHOUSE EVENT -->
+<section id="eventCard" class="card" hidden>
+  <div class="scrubhead">
+    <h2 style="margin:0">Clubhouse event</h2>
+    <div class="meta" id="evMeta"></div>
+  </div>
+  <div class="zoomrow">
+    <span class="lbl">Name</span>
+    <input id="evName" placeholder="Training weekend" style="min-width:150px">
+    <span class="lbl">From</span>
+    <input type="datetime-local" id="evFrom">
+    <span class="lbl">to</span>
+    <input type="datetime-local" id="evTo">
+    <button id="evSave" class="primary">Open event</button>
+    <span class="meta" id="evProg"></span>
+  </div>
+  <p class="hint">Sets the bracket for the members' page at <a href="games.html" style="color:var(--amber)">games.html</a>.
+    Torn keeps no history of battle stats, so a member's gain can only count from the moment they first tap Record —
+    tell people to tap once when it opens. Opening an event <b>clears the board</b>, so only do it when you mean to start fresh.</p>
+</section>
+
 <!-- HOME ARMOURY -->
 <section id="homeArmCard" class="card" hidden>
   <div class="scrubhead">
@@ -850,7 +871,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-07 08:29</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-07 08:51</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2508,7 +2529,7 @@ $("payCsv").onclick=()=>{
 
 /* ---------- dashboard tabs ---------- */
 const WAR_CARDS=["scrubCard","tableCard","tlCard","medCard","armCard","chainCard","payCard","qualityCard"];
-const TABS={ faction:["facCard","homeArmCard"], war:["homeCard","warpick"], oc:["ocCard","ocPartCard","ocTypeCard"] };
+const TABS={ faction:["facCard","homeArmCard","eventCard"], war:["homeCard","warpick"], oc:["ocCard","ocPartCard","ocTypeCard"] };
 let dashTab = "faction";
 function showTab(t){
   dashTab = TABS[t]? t : "faction";
@@ -2522,7 +2543,7 @@ function showTab(t){
   $("settings").hidden = !inWar;
   $("switchWar").hidden = !inWar;
   $("vsline").hidden = !inWar;
-  if(dashTab==="faction"){ if(!homeRows) loadHome(); if(!ocRaw) loadOC(); if(!homeArm) loadHomeArm(); renderFaction() }
+  if(dashTab==="faction"){ loadEvent(); if(!homeRows) loadHome(); if(!ocRaw) loadOC(); if(!homeArm) loadHomeArm(); renderFaction() }
   if(dashTab==="war" && !homeRows) loadHome();
   if(dashTab==="oc" && !ocRaw) loadOC();
   bindDashCharts();
@@ -2687,6 +2708,48 @@ function bindDashCharts(){
   makeZoomable("homeArm", $("homeArmZoom"), $("homeArmRows"), $("homeArmBar"));
   makeZoomable("ocChart", $("ocChartZoom"), $("ocChartInner"), $("ocChartBar"));
 }
+
+
+/* ---------- clubhouse event ----------
+   The members' page measures gains between these two times. Battle stats have
+   no history in the API, so the window only decides which readings count — it
+   cannot reach back for a baseline nobody recorded. */
+async function evCall(params){
+  const u=new URL((cfg.syncUrl||"").replace(/\/+$/,"")+"/train");
+  u.searchParams.set("token", cfg.syncTok||"");
+  for(const [k,v] of Object.entries(params)) u.searchParams.set(k,v);
+  const j=await (await fetch(u)).json();
+  if(j.error) throw new Error(j.error);
+  return j;
+}
+function renderEvent(j){
+  const ev=(j&&j.event)||{};
+  if(!ev.from){ $("evMeta").textContent="no event set"; return }
+  const now=Math.floor(Date.now()/1000);
+  const state = now<ev.from? "opens "+fmtDT(ev.from) : now>ev.to? "finished "+fmtDT(ev.to) : "running until "+fmtDT(ev.to);
+  $("evMeta").textContent=(ev.name? ev.name+" · ":"")+state+(j.board? ` · ${j.board.length} taking part`:"");
+  $("evName").value=ev.name||"";
+  $("evFrom").value=tsToLocalInput(ev.from);
+  $("evTo").value=tsToLocalInput(ev.to);
+}
+async function loadEvent(){
+  if(!cfg.syncUrl){ $("evMeta").textContent="set the worker URL in Polling & data first"; return }
+  try{ renderEvent(await evCall({})) }catch(e){ $("evMeta").textContent=e.message }
+}
+$("evSave").onclick=async()=>{
+  const f=$("evFrom").value, t=$("evTo").value;
+  if(!f||!t){ $("evProg").textContent="pick both times"; return }
+  const from=Math.floor(new Date(f+"Z").getTime()/1000), to=Math.floor(new Date(t+"Z").getTime()/1000);
+  if(to<=from){ $("evProg").textContent="the end must be after the start"; return }
+  if(!confirm("Open this event? It clears the current leaderboard.")) return;
+  $("evSave").disabled=true; $("evProg").textContent="saving…";
+  try{
+    await evCall({set:1, from, to, name:$("evName").value.trim()});
+    renderEvent(await evCall({}));
+    $("evProg").textContent="open";
+  }catch(e){ $("evProg").textContent=e.message }
+  finally{ $("evSave").disabled=false; setTimeout(()=>$("evProg").textContent="",5000) }
+};
 
 /* ---------- faction overview ----------
    One row per member pulling both halves together: how they fight and how they

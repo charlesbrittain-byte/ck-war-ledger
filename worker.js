@@ -40,24 +40,33 @@ export default {
     if (url.pathname.endsWith("/train")) {
       if (!isAdmin && !isGames) return json({ error: "bad or missing token" }, 403, cors);
       const key = "train";
-      let doc = (await env.LEDGER.get(key, "json")) || { users: {}, event: { started: Math.floor(Date.now() / 1000) } };
+      let doc = (await env.LEDGER.get(key, "json")) || { users: {}, event: {} };
       const now = Math.floor(Date.now() / 1000);
 
-      if (url.searchParams.has("reset")) {                      // leadership only: new event
+      // Leaders set the bracket. Torn keeps no history of battle stats — a
+      // timestamped request just returns today's figures — so a baseline only
+      // exists if someone recorded one while the event was running. Changing
+      // the window therefore starts a fresh board.
+      if (url.searchParams.has("set") || url.searchParams.has("reset")) {
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
-        doc = { users: {}, event: { started: now, name: url.searchParams.get("name") || "" } };
+        const from = +url.searchParams.get("from") || now;
+        const to = +url.searchParams.get("to") || (from + 2 * 86400);
+        doc = { users: {}, event: { from, to, name: (url.searchParams.get("name") || "").slice(0, 40) } };
         await env.LEDGER.put(key, JSON.stringify(doc));
         return json({ ok: true, event: doc.event }, 200, cors);
       }
 
+      const ev = doc.event || {};
+      const open = ev.from && ev.to && now >= ev.from && now <= ev.to;
       const id = +url.searchParams.get("id") || 0;
       const total = +url.searchParams.get("total") || 0;
-      if (id && total) {
+      if (id && total && open) {
         const name = (url.searchParams.get("name") || "").slice(0, 30);
         const u = doc.users[id];
+        // first reading inside the window is the baseline, and it stays the
+        // baseline — a later drop is a real loss, not a new start
         if (!u) doc.users[id] = { name, first: total, firstAt: now, last: total, lastAt: now };
-        else { u.name = name || u.name; u.last = total; u.lastAt = now;
-               if (total < u.first) { u.first = total; u.firstAt = now } }   // a lower reading means a fresh baseline
+        else { u.name = name || u.name; u.last = total; u.lastAt = now }
         await env.LEDGER.put(key, JSON.stringify(doc));
       }
 
@@ -65,9 +74,10 @@ export default {
       const board = Object.entries(doc.users).map(([uid, u]) => ({
         id: +uid, name: u.name,
         gain: u.first > 0 ? +(100 * (u.last - u.first) / u.first).toFixed(3) : 0,
-        since: u.firstAt, updated: u.lastAt
+        since: u.firstAt, updated: u.lastAt,
+        lateBy: ev.from ? Math.max(0, u.firstAt - ev.from) : 0
       })).sort((a, b) => b.gain - a.gain);
-      return json({ event: doc.event, board, you: id || null }, 200, cors);
+      return json({ event: ev, open: !!open, now, board, you: id || null }, 200, cors);
     }
 
     if (!isAdmin) return json({ error: "bad or missing token" }, 403, cors);
