@@ -216,8 +216,8 @@ async function tickFriends(env, t, atWar) {
 }
 
 // Members who opted in get their readings taken for them: once the event opens
-// (the baseline nobody remembers to set), every 12 hours after, and once more
-// just before it closes. Each call uses that member's own key — the only key
+// (the baseline nobody remembers to set), hourly after that, and once more just
+// before it closes. One call per member per hour, against their own key. Each call uses that member's own key — the only key
 // that can see their battle stats.
 async function tickTraining(env, t) {
   const doc = await env.LEDGER.get("train", "json");
@@ -245,7 +245,7 @@ async function tickTraining(env, t) {
     } catch (e) { /* skip and try again next time */ }
   }
   const nearEnd = ev.to - 120;
-  doc.nextPoll = t >= nearEnd ? ev.to + 1 : Math.min(t + 12 * 3600, nearEnd);
+  doc.nextPoll = t >= nearEnd ? ev.to + 1 : Math.min(t + 3600, nearEnd);
   await env.LEDGER.put("train", JSON.stringify(doc));
 }
 

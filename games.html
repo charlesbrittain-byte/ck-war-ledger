@@ -95,7 +95,7 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
     <label style="display:flex; gap:9px; align-items:flex-start; cursor:pointer">
       <input type="checkbox" id="auto" style="margin-top:4px; width:auto">
       <span><b>Let the clubhouse record for me</b> — your key is kept by the faction's tracker so it takes your
-      readings automatically: once when the event opens, every 12 hours, and once at the end. No tapping, and your
+      readings automatically: once when the event opens, every hour after that, and once at the end. No tapping, and your
       starting point is caught even if you are asleep. It is only ever used to read your own battle stats, only the
       percentage is shared, and you can switch this off here at any time.</span>
     </label>
@@ -121,7 +121,7 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-07 09:08";
+const BUILD = "2026-10-07 09:15";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me" };
 let me = null, lastData = null;
