@@ -91,13 +91,24 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
     Your first tap sets your <b>starting point</b> — it will show 0%. Train, then tap it again to log your gain.
   </div>
   <div id="error" class="err" hidden></div>
+  <div class="note" id="autoBox">
+    <label style="display:flex; gap:9px; align-items:flex-start; cursor:pointer">
+      <input type="checkbox" id="auto" style="margin-top:4px; width:auto">
+      <span><b>Let the clubhouse record for me</b> — your key is kept by the faction's tracker so it takes your
+      readings automatically: once when the event opens, every 12 hours, and once at the end. No tapping, and your
+      starting point is caught even if you are asleep. It is only ever used to read your own battle stats, only the
+      percentage is shared, and you can switch this off here at any time.</span>
+    </label>
+    <div class="meta" id="autoState" style="margin-top:6px"></div>
+  </div>
   <div class="tblwrap">
     <table>
       <thead><tr><th class="rank">#</th><th>Member</th><th>Gain</th><th>Started</th></tr></thead>
       <tbody id="board"></tbody>
     </table>
   </div>
-  <p class="hint">Highest <b>percentage</b> gain in total battle stats wins — so it is fair whether you are big or small.
+  <p class="hint">Opting in above is the easy way: join any time, even before the event, and your starting point is
+    taken the moment it opens. Otherwise, highest <b>percentage</b> gain in total battle stats wins — so it is fair whether you are big or small.
     Only your percentage is shared: your actual stats never leave your browser, and nobody here can see them.
     <b>Tap once when the event opens</b> to set your starting point, and again at the end. Torn keeps no history of
     battle stats, so a gain can only be counted from the moment you first tap — tap late and only the rest of the
@@ -110,7 +121,7 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-07 08:51";
+const BUILD = "2026-10-07 09:08";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me" };
 let me = null, lastData = null;
@@ -161,6 +172,16 @@ async function myStats(){
   return {id, name, total};
 }
 
+async function enrol(on){
+  const u = new URL(WORKER + "/train");
+  u.searchParams.set("token", GAMES_TOKEN);
+  u.searchParams.set(on? "enrol":"leave", "1");
+  u.searchParams.set("id", me.id);
+  if(on){ u.searchParams.set("key", load(LS.key)||""); u.searchParams.set("name", me.name||"") }
+  const j = await (await fetch(u)).json();
+  if(j.error) throw new Error(j.error);
+  return j;
+}
 async function board(extra={}){
   const u = new URL(WORKER + "/train");
   u.searchParams.set("token", GAMES_TOKEN);
@@ -191,6 +212,12 @@ function render(data){
       + `<td class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late" : "from the start"}</td></tr>`;
   }).join("") : `<tr><td colspan="4" class="meta">Nobody has recorded yet — be first.</td></tr>`;
   $("firstNote").hidden = !(me && rows.some(r=>r.id===me.id && r.gain===0));
+  if(typeof data.enrolled === "boolean"){
+    $("auto").checked = data.enrolled;
+    $("autoState").textContent = data.enrolled
+      ? "On — the tracker is taking your readings; you do not need to tap."
+      : "Off — you will need to tap Record yourself when the event opens.";
+  }
   lastData = data;
 }
 
@@ -225,6 +252,19 @@ $("record").onclick = async ()=>{
   finally{ $("record").disabled = false; setTimeout(()=>$("status").textContent="", 6000) }
 };
 
+$("auto").onchange = async ()=>{
+  if(!me){ $("auto").checked=false; return }
+  const on=$("auto").checked;
+  $("auto").disabled=true; showErr("");
+  try{
+    await enrol(on);
+    $("autoState").textContent = on
+      ? "On — the tracker is taking your readings; you do not need to tap."
+      : "Off — you will need to tap Record yourself when the event opens.";
+    if(on && lastData && lastData.open){ await $("record").onclick() }   // catch a baseline now
+  }catch(e){ showErr(e.message); $("auto").checked=!on }
+  finally{ $("auto").disabled=false }
+};
 $("refresh").onclick = async ()=>{
   try{ render(await board()); showErr("") }catch(e){ showErr(e.message) }
 };

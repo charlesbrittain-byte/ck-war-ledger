@@ -56,6 +56,28 @@ export default {
         return json({ ok: true, event: doc.event }, 200, cors);
       }
 
+      // Opting in: a member hands over their own key so the worker can take the
+      // readings for them. Keys live in their own KV entry and are never served
+      // by any endpoint — not to members, not to leaders.
+      if (url.searchParams.has("enrol") || url.searchParams.has("leave")) {
+        const id = +url.searchParams.get("id") || 0;
+        if (!id) return json({ error: "missing id" }, 400, cors);
+        const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
+        if (url.searchParams.has("leave")) { delete keys[id]; }
+        else {
+          const k = url.searchParams.get("key") || "";
+          if (!k) return json({ error: "missing key" }, 400, cors);
+          keys[id] = { key: k, name: (url.searchParams.get("name") || "").slice(0, 30), at: Math.floor(Date.now() / 1000) };
+        }
+        await env.LEDGER.put("trainkeys", JSON.stringify(keys));
+        return json({ ok: true, enrolled: !!keys[id] }, 200, cors);
+      }
+      if (url.searchParams.has("enrolled")) {          // leaders: who opted in, names only
+        if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
+        const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
+        return json({ enrolled: Object.entries(keys).map(([id, v]) => ({ id: +id, name: v.name, at: v.at })) }, 200, cors);
+      }
+
       const ev = doc.event || {};
       const open = ev.from && ev.to && now >= ev.from && now <= ev.to;
       const id = +url.searchParams.get("id") || 0;
@@ -77,7 +99,12 @@ export default {
         since: u.firstAt, updated: u.lastAt,
         lateBy: ev.from ? Math.max(0, u.firstAt - ev.from) : 0
       })).sort((a, b) => b.gain - a.gain);
-      return json({ event: ev, open: !!open, now, board, you: id || null }, 200, cors);
+      let enrolledMe = false;
+      if (id) {
+        const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
+        enrolledMe = !!keys[id];
+      }
+      return json({ event: ev, open: !!open, now, board, you: id || null, enrolled: enrolledMe }, 200, cors);
     }
 
     if (!isAdmin) return json({ error: "bad or missing token" }, 403, cors);
@@ -188,6 +215,40 @@ async function tickFriends(env, t, atWar) {
   }
 }
 
+// Members who opted in get their readings taken for them: once the event opens
+// (the baseline nobody remembers to set), every 12 hours after, and once more
+// just before it closes. Each call uses that member's own key — the only key
+// that can see their battle stats.
+async function tickTraining(env, t) {
+  const doc = await env.LEDGER.get("train", "json");
+  if (!doc || !doc.event || !doc.event.from) return;
+  const ev = doc.event;
+  if (t < ev.from || t > ev.to) return;
+  if (doc.nextPoll && t < doc.nextPoll) return;
+  const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
+  const ids = Object.keys(keys);
+  if (!ids.length) { doc.nextPoll = t + 3600; await env.LEDGER.put("train", JSON.stringify(doc)); return }
+  let changed = false;
+  for (const id of ids) {
+    try {
+      const r = await fetch("https://api.torn.com/v2/user/personalstats?cat=battle_stats&key="
+        + encodeURIComponent(keys[id].key) + "&comment=CKClubhouse");
+      const j = await r.json();
+      if (j && j.error) continue;                       // a dead key should not stop the rest
+      const bs = j.personalstats && (j.personalstats.battle_stats || j.personalstats);
+      const total = bs && (bs.total ?? ((bs.strength || 0) + (bs.defense || 0) + (bs.speed || 0) + (bs.dexterity || 0)));
+      if (!total) continue;
+      const u = doc.users[id];
+      if (!u) doc.users[id] = { name: keys[id].name, first: total, firstAt: t, last: total, lastAt: t };
+      else { u.last = total; u.lastAt = t; if (keys[id].name) u.name = keys[id].name }
+      changed = true;
+    } catch (e) { /* skip and try again next time */ }
+  }
+  const nearEnd = ev.to - 120;
+  doc.nextPoll = t >= nearEnd ? ev.to + 1 : Math.min(t + 12 * 3600, nearEnd);
+  await env.LEDGER.put("train", JSON.stringify(doc));
+}
+
 async function tick(env) {
   const t = Math.floor(Date.now() / 1000);
   let meta = (await env.LEDGER.get("meta", "json")) || {};
@@ -222,6 +283,7 @@ async function tick(env) {
   }
 
   await tickFriends(env, t, !!meta.active);
+  await tickTraining(env, t);
 
   let act = meta.active;
   if (act && act.start > t) return;
