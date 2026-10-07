@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clubhouse — Champagne Killers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#14171B; --panel:#1C2025; --panel2:#22272D; --line:#2A2F36;
+  --text:#CDD3D8; --dim:#8A939B; --faint:#5A626B;
+  --up:#7FB069; --down:#D0555B; --amber:#D9A036; --steel:#5E8CA8;
+}
+*{box-sizing:border-box; margin:0; padding:0}
+[hidden]{display:none !important}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--bg); color:var(--text);
+  font-family:"Barlow Semi Condensed","Arial Narrow",Arial,sans-serif;
+  font-size:16.5px; line-height:1.42; font-variant-numeric:tabular-nums; padding:0 0 60px}
+button{font:inherit; cursor:pointer; color:var(--text); background:var(--panel2);
+  border:1px solid var(--line); border-radius:6px; padding:6px 14px; transition:background .12s,border-color .12s}
+button:hover{border-color:var(--dim); background:#272D34}
+button.primary{background:var(--amber); border-color:var(--amber); color:#1A1408; font-weight:600}
+button[disabled]{opacity:.45; cursor:default}
+input{font:inherit; color:var(--text); background:#15181C; border:1px solid var(--line); border-radius:6px; padding:6px 10px}
+.wrap{max-width:720px; margin:0 auto; padding:0 14px}
+header.top{border-bottom:1px solid var(--line); background:linear-gradient(180deg,#20252B,#1A1E23);
+  position:sticky; top:0; z-index:20; box-shadow:0 2px 10px rgba(0,0,0,.35)}
+.topline{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; padding:11px 0 9px}
+.topline h1{font-size:22px; font-weight:700}
+.topline h1 span{color:var(--amber)}
+section{margin-top:12px}
+.card{background:linear-gradient(180deg,#1E2228 0%,var(--panel) 46%); border:1px solid var(--line);
+  border-radius:9px; padding:13px 15px 15px; box-shadow:0 1px 0 rgba(255,255,255,.025) inset, 0 3px 10px rgba(0,0,0,.22)}
+h2{font-size:15px; font-weight:700; color:var(--text); margin-bottom:9px;
+  letter-spacing:.09em; text-transform:uppercase; display:flex; align-items:center; gap:9px}
+h2::before{content:""; width:3px; height:15px; background:var(--amber); border-radius:2px; flex:none}
+.row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+.hint{color:var(--dim); font-size:14px; margin-top:9px; line-height:1.5}
+.hint b{color:var(--text)}
+.meta{color:var(--dim); font-size:14px}
+table{border-collapse:collapse; width:100%; font-size:15.5px}
+th,td{padding:7px 10px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap}
+th{color:var(--faint); font-weight:700; font-size:12px; letter-spacing:.06em; text-transform:uppercase; background:#181C21}
+th:first-child,td:first-child{text-align:left}
+tbody tr:hover td{background:#22272D}
+tr.me td{background:#20262C}
+tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
+.rank{color:var(--faint); width:2.2em}
+.gain{font-weight:700; font-size:17px}
+.pos{color:var(--up)} .zero{color:var(--faint)}
+.medal{font-size:17px}
+.tblwrap{overflow-x:auto; margin-top:4px}
+.foot{margin-top:22px; color:var(--faint); font-size:13px}
+.note{background:#181C21; border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin-top:10px; color:var(--dim); font-size:14px}
+.err{background:#3A2225; border:1px solid var(--down); color:#E8B9BC; border-radius:8px; padding:9px 11px; margin-top:10px; font-size:14px}
+@media (max-width:640px){ body{font-size:15.5px} .card{padding:11px 12px 13px} }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap"><div class="topline">
+    <h1>CK <span>Clubhouse</span></h1>
+    <div class="meta" style="margin-left:auto" id="who"></div>
+  </div></div>
+</header>
+
+<div class="wrap">
+
+<section id="setup" class="card">
+  <h2>Join in</h2>
+  <div class="row">
+    <input id="key" type="password" placeholder="Paste your Limited API key" autocomplete="off" spellcheck="false" style="flex:1; min-width:200px; font-family:ui-monospace,monospace">
+    <button class="primary" id="connect">Connect</button>
+  </div>
+  <p class="hint">A <b>Limited</b> key from torn.com → Settings → API key. It is stored only in this browser and only ever sent to api.torn.com.
+    Nobody can read your battle stats but you — that is why you record your own.</p>
+</section>
+
+<section id="main" class="card" hidden>
+  <h2>Training leaderboard <span id="eventName" class="meta" style="text-transform:none; letter-spacing:0; font-weight:400"></span></h2>
+  <div class="row">
+    <button class="primary" id="record">Record my gains</button>
+    <button id="refresh">Refresh board</button>
+    <span class="meta" id="status"></span>
+  </div>
+  <div class="note" id="firstNote" hidden>
+    Your first tap sets your <b>starting point</b> — it will show 0%. Train, then tap it again to log your gain.
+  </div>
+  <div id="error" class="err" hidden></div>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th class="rank">#</th><th>Member</th><th>Gain</th><th>Updated</th></tr></thead>
+      <tbody id="board"></tbody>
+    </table>
+  </div>
+  <p class="hint">Highest <b>percentage</b> gain in total battle stats wins — so it is fair whether you are big or small.
+    Only your percentage is shared: your actual stats never leave your browser, and nobody here can see them.
+    Tap <b>Record my gains</b> whenever you like; the board uses your best reading since you started.</p>
+</section>
+
+<p class="foot wrap"><span id="build" style="color:var(--faint)"></span> · Times are TCT. Your API key stays in this browser.</p>
+</div>
+
+<script>
+const WORKER = "https://ck-war-ledger.spill298.workers.dev";
+const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
+const BUILD = "2026-10-07 08:29";
+const $ = id => document.getElementById(id);
+const LS = { key:"ckc_key", me:"ckc_me" };
+let me = null;
+
+$("build").textContent = "build " + BUILD;
+
+function save(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)) }catch(e){} }
+function load(k){ try{ const v=localStorage.getItem(k); return v? JSON.parse(v):null }catch(e){ return null } }
+function fmtAgo(t){ const s=Math.floor(Date.now()/1000)-t;
+  if(s<90) return s+"s ago"; if(s<5400) return Math.round(s/60)+"m ago";
+  if(s<172800) return Math.round(s/3600)+"h ago"; return Math.round(s/86400)+"d ago" }
+function esc(s){ return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])) }
+function showErr(m){ const e=$("error"); if(!m){ e.hidden=true; return } e.hidden=false; e.textContent=m }
+
+async function torn(path, params={}){
+  const u = new URL("https://api.torn.com/v2"+path);
+  for(const [k,v] of Object.entries(params)) if(v!=null) u.searchParams.set(k,v);
+  u.searchParams.set("key", load(LS.key)||"");
+  u.searchParams.set("comment","CKClubhouse");
+  const r = await fetch(u); const j = await r.json();
+  if(j && j.error){
+    const map={1:"That key looks empty.",2:"That API key isn't valid — check for typos.",
+      5:"Torn is rate limiting — wait a minute and try again.",13:"That key is disabled through inactivity.",
+      14:"You've hit Torn's daily data limit — try again tomorrow.",16:"That key's access level is too low; a Limited key is enough.",
+      18:"That key has been paused by its owner."};
+    throw new Error(map[j.error.code] || (j.error.error+" (code "+j.error.code+")"));
+  }
+  return j;
+}
+
+// Each person reads their own battle stats with their own key — Torn will not
+// show them to anyone else, which is exactly why this is self-reported.
+async function myStats(){
+  const basic = await torn("/user/basic").catch(()=>null);
+  const b = basic && (basic.basic || basic.profile || basic);
+  const id = b && (b.id ?? b.player_id);
+  const name = (b && b.name) || "";
+  const ps = await torn("/user/personalstats", {cat:"battle_stats"});
+  const bs = ps && ps.personalstats && (ps.personalstats.battle_stats || ps.personalstats);
+  const total = bs && (bs.total ?? ((bs.strength||0)+(bs.defense||0)+(bs.speed||0)+(bs.dexterity||0)));
+  if(!id || !total) throw new Error("Couldn't read your stats — make sure the key is a Limited key for your own account.");
+  return {id, name, total};
+}
+
+async function board(extra={}){
+  const u = new URL(WORKER + "/train");
+  u.searchParams.set("token", GAMES_TOKEN);
+  for(const [k,v] of Object.entries(extra)) u.searchParams.set(k,v);
+  const r = await fetch(u); const j = await r.json();
+  if(j.error) throw new Error(j.error);
+  return j;
+}
+
+function render(data){
+  const rows = data.board || [];
+  $("eventName").textContent = data.event && data.event.name ? "· " + data.event.name : "";
+  const medals = ["🥇","🥈","🥉"];
+  $("board").innerHTML = rows.length ? rows.map((r,i)=>{
+    const mine = me && r.id === me.id;
+    return `<tr class="${mine?"me":""}">`
+      + `<td class="rank">${i<3? `<span class="medal">${medals[i]}</span>` : (i+1)}</td>`
+      + `<td>${esc(r.name||("["+r.id+"]"))}${mine? ' <span class="meta">you</span>':""}</td>`
+      + `<td class="gain ${r.gain>0?"pos":"zero"}">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
+      + `<td class="meta">${fmtAgo(r.updated)}</td></tr>`;
+  }).join("") : `<tr><td colspan="4" class="meta">Nobody has recorded yet — be first.</td></tr>`;
+  $("firstNote").hidden = !(me && rows.some(r=>r.id===me.id && r.gain===0));
+}
+
+$("connect").onclick = async ()=>{
+  const k = $("key").value.trim();
+  if(!k){ showErr("Paste your API key first."); return }
+  save(LS.key, k);
+  showErr("");
+  $("connect").disabled = true;
+  try{
+    me = await myStats();
+    save(LS.me, {id:me.id, name:me.name});
+    $("who").textContent = me.name;
+    $("setup").hidden = true; $("main").hidden = false;
+    render(await board());
+  }catch(e){ showErr(e.message) }
+  finally{ $("connect").disabled = false }
+};
+
+$("record").onclick = async ()=>{
+  $("record").disabled = true; $("status").textContent = "reading your stats…"; showErr("");
+  try{
+    me = await myStats();
+    $("who").textContent = me.name;
+    const data = await board({id:me.id, name:me.name, total:me.total});
+    render(data);
+    const mine = (data.board||[]).find(r=>r.id===me.id);
+    $("status").textContent = mine && mine.gain>0 ? `logged — you're up ${mine.gain.toFixed(2)}%` : "starting point saved";
+  }catch(e){ showErr(e.message); $("status").textContent="" }
+  finally{ $("record").disabled = false; setTimeout(()=>$("status").textContent="", 6000) }
+};
+
+$("refresh").onclick = async ()=>{
+  try{ render(await board()); showErr("") }catch(e){ showErr(e.message) }
+};
+
+(function boot(){
+  const k = load(LS.key), m = load(LS.me);
+  if(!k) return;
+  $("key").value = k;
+  if(m){ me = m; $("who").textContent = m.name || "" }
+  $("setup").hidden = true; $("main").hidden = false;
+  board().then(render).catch(e=>showErr(e.message));
+})();
+</script>
+</body>
+</html>

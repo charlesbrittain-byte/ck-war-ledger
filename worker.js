@@ -30,8 +30,47 @@ export default {
         "Access-Control-Allow-Methods": "GET,OPTIONS",
         "Access-Control-Allow-Headers": "*"
       }});
-    if (env.TRACKER_TOKEN && url.searchParams.get("token") !== env.TRACKER_TOKEN)
-      return json({ error: "bad or missing token" }, 403, cors);
+    const tok = url.searchParams.get("token");
+    const isAdmin = !env.TRACKER_TOKEN || tok === env.TRACKER_TOKEN;
+    const isGames = env.GAMES_TOKEN && tok === env.GAMES_TOKEN;
+
+    // Training leaderboard. Members post their own battle-stat total from their
+    // own key — nobody can read anyone else's — and only the percentage gained
+    // is ever served back, never the totals themselves.
+    if (url.pathname.endsWith("/train")) {
+      if (!isAdmin && !isGames) return json({ error: "bad or missing token" }, 403, cors);
+      const key = "train";
+      let doc = (await env.LEDGER.get(key, "json")) || { users: {}, event: { started: Math.floor(Date.now() / 1000) } };
+      const now = Math.floor(Date.now() / 1000);
+
+      if (url.searchParams.has("reset")) {                      // leadership only: new event
+        if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
+        doc = { users: {}, event: { started: now, name: url.searchParams.get("name") || "" } };
+        await env.LEDGER.put(key, JSON.stringify(doc));
+        return json({ ok: true, event: doc.event }, 200, cors);
+      }
+
+      const id = +url.searchParams.get("id") || 0;
+      const total = +url.searchParams.get("total") || 0;
+      if (id && total) {
+        const name = (url.searchParams.get("name") || "").slice(0, 30);
+        const u = doc.users[id];
+        if (!u) doc.users[id] = { name, first: total, firstAt: now, last: total, lastAt: now };
+        else { u.name = name || u.name; u.last = total; u.lastAt = now;
+               if (total < u.first) { u.first = total; u.firstAt = now } }   // a lower reading means a fresh baseline
+        await env.LEDGER.put(key, JSON.stringify(doc));
+      }
+
+      // percentages only: absolute battle stats stay private
+      const board = Object.entries(doc.users).map(([uid, u]) => ({
+        id: +uid, name: u.name,
+        gain: u.first > 0 ? +(100 * (u.last - u.first) / u.first).toFixed(3) : 0,
+        since: u.firstAt, updated: u.lastAt
+      })).sort((a, b) => b.gain - a.gain);
+      return json({ event: doc.event, board, you: id || null }, 200, cors);
+    }
+
+    if (!isAdmin) return json({ error: "bad or missing token" }, 403, cors);
 
     if (url.pathname.endsWith("/snaps")) {
       const facId = url.searchParams.get("fac");
@@ -74,7 +113,7 @@ export default {
       } else if (+env.TEST_UNTIL) meta.test = { recording: false, note: "test window has expired" };
       return json(meta, 200, cors);
     }
-    return json({ ok: true, endpoints: ["/snaps?war=ID", "/snaps?fac=ID", "/terms?war=ID", "/status"] }, 200, cors);
+    return json({ ok: true, endpoints: ["/snaps?war=ID", "/snaps?fac=ID", "/terms?war=ID", "/train", "/status"] }, 200, cors);
   }
 };
 
