@@ -112,13 +112,17 @@ export default {
         const xan = Math.max(0, (u.xan || 0) - (u.firstX || 0));
         const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
         const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
+        const ser = u.first > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / u.first).toFixed(3)]) : [];
+        // boards recorded by the older build lost their baseline timestamp from
+        // the series, but firstAt still has it — put the anchor back
+        if (ser.length && u.firstAt && ser[0][0] > u.firstAt) ser.unshift([u.firstAt, 0]);
         return {
         id: +uid, name: u.name,
         gain: u.first > 0 ? +(100 * (u.last - u.first) / u.first).toFixed(3) : 0,
         energy: xan * 250 + ref * (u.maxE || 0), xan, refills: ref, drinks: drk, maxE: u.maxE || 0,
         since: u.firstAt, updated: u.lastAt,
         lateBy: ev.from ? Math.max(0, u.firstAt - ev.from) : 0,
-        series: u.first > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / u.first).toFixed(3)]) : []
+        series: ser
       }}).sort((a, b) => b.gain - a.gain);
       let enrolledMe = false;
       if (id) {
@@ -281,8 +285,17 @@ async function maxEnergy(key){
 
 function pushSample(u, t, total){
   u.s = u.s || [];
-  const last = u.s[u.s.length - 1];
-  if (last && last[1] === total) { last[0] = t; return false }   // no movement, just restamp
+  const n = u.s.length;
+  const last = u.s[n - 1];
+  // A flat stretch needs two points, not one. Collapsing it to a single
+  // restamped point dragged the baseline forward every poll, so a line only
+  // appeared from the moment that person trained — not from the start of the
+  // event. Only ever move the END of a run that already has a start.
+  if (last && last[1] === total) {
+    if (n >= 2 && u.s[n - 2][1] === total) { last[0] = t; return false }
+    u.s.push([t, total]);
+    return false;
+  }
   u.s.push([t, total]);
   if (u.s.length > 160) u.s = u.s.filter((_, i) => i % 2 === 0 || i >= u.s.length - 60);
   return true;
