@@ -103,12 +103,9 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <h2>Training leaderboard <span id="eventName" class="meta" style="text-transform:none; letter-spacing:0; font-weight:400"></span></h2>
   <div class="note" id="window"></div>
   <div class="row" style="margin-top:10px">
-    <button class="primary" id="record">Record my gains</button>
-    <button id="refresh">Refresh board</button>
+    <span class="meta" id="updated"></span>
+    <button id="refresh" class="linkish">Refresh now</button>
     <span class="meta" id="status"></span>
-  </div>
-  <div class="note" id="firstNote" hidden>
-    Your first tap sets your <b>starting point</b> — it will show 0%. Train, then tap it again to log your gain.
   </div>
   <div id="error" class="err" hidden></div>
   <div class="note" id="autoBox">
@@ -143,12 +140,10 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     opened — xanax you bought yourself won't show. <b>Refills</b> and <b>Cans</b> come from your own stats.
     All three are for interest only and do not affect the score. <b>Gym E</b> and <b>FHC</b> need a key that shares
     your Torn log; they show &ldquo;—&rdquo; for everyone else. <a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats,log" target="_blank" rel="noopener">Make a key that includes the log &rsaquo;</a></p>
-  <p class="hint" id="smallprint">Opting in above is the easy way: join any time, even before the event, and your starting point is
-    taken the moment it opens. Otherwise, highest <b>percentage</b> gain in total battle stats wins — so it is fair whether you are big or small.
-    Only your percentage is shared: your actual stats never leave your browser, and nobody here can see them.
-    <b>Tap once when the event opens</b> to set your starting point, and again at the end. Torn keeps no history of
-    battle stats, so a gain can only be counted from the moment you first tap — tap late and only the rest of the
-    event counts for you, which the board shows beside your name.
+  <p class="hint" id="smallprint">There is nothing to press. Connect your key once — before the event if you like —
+    and the tracker takes your starting point the moment it opens, reads you every few minutes through it, and takes a
+    final reading at the end. Join late and only the rest of the event counts for you, which the board shows beside
+    your name: Torn keeps no history of battle stats, so nothing can be counted from before your first reading.
     <br><br>For <b>this</b> event Refills and Cans started counting part way through, when they were added. Xanax is
     complete, because the faction armoury log goes back. Future events count everything from the start.</p>
 </section>
@@ -179,7 +174,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 15:15";
+const BUILD = "2026-10-08 15:26";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -365,6 +360,7 @@ function renderHist(hist){
 }
 
 const num = v => (v==null? "—" : v===0? "0" : v.toLocaleString());
+const fmtClock = t => new Date(t*1000).toISOString().slice(11,16) + " TCT";
 function render(data){
   const rows = data.board || [];
   const ev = data.event || {};
@@ -375,7 +371,7 @@ function render(data){
   else if(now < ev.from){ w.innerHTML = `Opens <b>${fmtWhen(ev.from)}</b> — in ${fmtLeft(ev.from-now)}. Come back then and tap to set your starting point.`; }
   else if(now > ev.to){ w.innerHTML = `Finished <b>${fmtWhen(ev.to)}</b>. Final board below.`; }
   else { w.innerHTML = `Running until <b>${fmtWhen(ev.to)}</b> — ${fmtLeft(ev.to-now)} left.`; }
-  $("record").disabled = !data.open;
+  $("updated").textContent = "updated " + fmtClock(now||Math.floor(Date.now()/1000));
   $("board").innerHTML = rows.length ? rows.map((r,i)=>{
     const mine = me && r.id === me.id;
     return `<tr class="${mine?"me":""}">`
@@ -389,7 +385,6 @@ function render(data){
       + `<td class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late" : "from the start"}</td></tr>`;
   }).join("") : `<tr><td colspan="10" class="meta">Nobody has recorded yet — be first.</td></tr>`;
   $("estNote").hidden = !rows.some(r=>r.exact===false);
-  $("firstNote").hidden = !(me && rows.some(r=>r.id===me.id && r.gain===0));
   if(typeof data.enrolled === "boolean"){
     enrolled = data.enrolled;
     $("autoState").textContent = data.enrolled
@@ -420,13 +415,16 @@ $("connect").onclick = async ()=>{
     const d = await board({hist:1});
     render(d);
     if(!d.enrolled) await autoEnrol();
-    if(d.open) await $("record").onclick();          // catch a baseline straight away
+    if(d.open) await recordNow();                   // catch a baseline straight away
   }catch(e){ showErr(e.message) }
   finally{ $("connect").disabled = false }
 };
 
-$("record").onclick = async ()=>{
-  $("record").disabled = true; $("status").textContent = "reading your stats…"; showErr("");
+// Taking a reading is no longer something anyone presses — the tracker does it
+// every few minutes. This runs once on sign-in so a new member's starting point
+// is set immediately instead of up to three minutes later.
+async function recordNow(){
+  $("status").textContent = "reading your stats…"; showErr("");
   try{
     me = await myStats();
     $("who").textContent = me.name;
@@ -437,10 +435,10 @@ $("record").onclick = async ()=>{
     if(!data.open){ $("status").textContent = ""; showErr(data.event && data.event.from && data.now < data.event.from
         ? "The event hasn't opened yet." : "The event has finished — the board is final."); return }
     const mine = (data.board||[]).find(r=>r.id===me.id);
-    $("status").textContent = mine && mine.adj>0 ? `logged — you're up ${mine.adj.toFixed(2)}%` : "starting point saved";
+    $("status").textContent = mine && mine.adj>0 ? `you're up ${mine.adj.toFixed(2)}%` : "starting point saved";
   }catch(e){ showErr(e.message); $("status").textContent="" }
-  finally{ $("record").disabled = false; setTimeout(()=>$("status").textContent="", 6000) }
-};
+  finally{ setTimeout(()=>$("status").textContent="", 6000) }
+}
 
 // Connecting a key IS the decision to play, so there is nothing else to agree
 // to. Re-sending on every sign-in is harmless and keeps the stored name fresh.

@@ -882,7 +882,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-08 07:44</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-08 15:26</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -925,7 +925,8 @@ const LS = {
   cfg:"twl_cfg", war:"twl_war",
   atk:id=>"twl_atk_"+id, snap:id=>"twl_snap_"+id,
   esnap:id=>"twl_esnap_"+id, med:id=>"twl_med_"+id, arm:id=>"twl_arm_"+id, cur:id=>"twl_cur_"+id, chain:id=>"twl_chain_"+id,
-  pts:id=>"twl_pts_"+id, ref:id=>"twl_ref_"+id
+  pts:id=>"twl_pts_"+id, ref:id=>"twl_ref_"+id,
+  ha:"twl_homearm", oc:"twl_oc"          // faction-wide caches, not per war
 };
 let cfg = load(LS.cfg) || {key:"", pAtk:120, pMem:60, medHits:3, medBurst:60, medGap:300};
 let war = load(LS.war) || null;   // {facId,facName,warId,oppId,oppName,start,end,terms,label,custom}
@@ -2162,34 +2163,47 @@ async function fetchNewsRange(cat, from, to, maxPages){
   }
   return out;
 }
-async function loadHomeArm(){
+async function loadHomeArm(force){
   const btn=$("homeArmLoad"); btn.disabled=true;
   try{
     const days=+$("homeArmDays").value||14;
     const to=now(), from=to-days*86400;
-    $("homeArmProg").textContent="reading roster…";
+    // This used to re-read the whole fortnight on every page load — up to 25
+    // calls and a couple of thousand records before anything appeared. The
+    // parsed events are kept, and only news newer than the last read is asked
+    // for. Press Load to force a clean re-read.
+    const cache = force? null : load(LS.ha);
+    const fresh = cache && cache.days===days && cache.cur && cache.cur>from;
+    const since = fresh? Math.max(from, cache.cur-120) : from;
+    $("homeArmProg").textContent = fresh? "catching up…" : "reading roster…";
     const r=await api("/faction/members"); const t=now();
     for(const m of (r.members||[])){
       const dif=(m.days_in_faction ?? null);
       memberDir[m.id]={name:m.name, pos:m.position||"", lvl:m.level||0, joined: dif==null? null : t-dif*86400};
     }
-    $("homeArmProg").textContent="reading armoury news…";
-    const acts=await fetchNewsRange("armoryAction", from, to, 15);
-    $("homeArmProg").textContent="reading points…";
-    const gifts=await fetchNewsRange("giveFunds", from, to, 10);
+    if(!fresh) $("homeArmProg").textContent="reading armoury news…";
+    const acts=await fetchNewsRange("armoryAction", since, to, fresh?3:15);
+    if(!fresh) $("homeArmProg").textContent="reading points…";
+    const gifts=await fetchNewsRange("giveFunds", since, to, fresh?3:10);
     const evs=[];
     for(const n of acts){
       const m=ARM_RE.exec(n.text||"") || FILL_RE.exec(n.text||"");
-      if(m) evs.push({t:n.timestamp, id:+m[1], name:m[2], item:m[3].trim(), cls:armClass(m[3])});
+      if(m) evs.push({nid:n.id, t:n.timestamp, id:+m[1], name:m[2], item:m[3].trim(), cls:armClass(m[3])});
       else { const rf=/refill/i.test(n.text||"") && REFILL_RE.exec(n.text||"");
-             if(rf) evs.push({t:n.timestamp, id:+rf[1], name:rf[2], item:rf[3].replace(/<[^>]+>/g,"").trim(), cls:"refill"}) }
+             if(rf) evs.push({nid:n.id, t:n.timestamp, id:+rf[1], name:rf[2], item:rf[3].replace(/<[^>]+>/g,"").trim(), cls:"refill"}) }
     }
     for(const n of gifts){
       const m=PTS_RE.exec(n.text||"");
-      if(m) evs.push({t:n.timestamp, id:+m[1], name:m[2], item:m[3]+" faction points", cls:"pts", pts:+m[3].replace(/,/g,"")});
+      if(m) evs.push({nid:n.id, t:n.timestamp, id:+m[1], name:m[2], item:m[3]+" faction points", cls:"pts", pts:+m[3].replace(/,/g,"")});
     }
-    evs.sort((a,b)=>a.t-b.t);
-    homeArm={evs, from, to, at:now(), fetchedFrom:from, fetchedTo:to};
+    // merge with whatever we already had, drop anything that has aged out of
+    // the window, and de-duplicate on the news id
+    const keep = fresh? (cache.evs||[]).filter(e=>e.t>=from) : [];
+    const seen = new Set(keep.map(e=>e.nid).filter(Boolean));
+    for(const e of evs) if(!e.nid || !seen.has(e.nid)){ keep.push(e); if(e.nid) seen.add(e.nid) }
+    keep.sort((a,b)=>a.t-b.t);
+    homeArm={evs:keep, from, to, at:now(), fetchedFrom:from, fetchedTo:to};
+    save(LS.ha, {days, cur:to, evs:keep});
     $("homeArmProg").textContent = evs.length? "" : "nothing logged in this period";
     renderHomeArm(); bindDashCharts();
   }catch(e){ $("homeArmProg").textContent=e.message }
@@ -2262,7 +2276,7 @@ $("haHead").addEventListener("click",e=>{
   haSort = haSort.k===k? {k, dir:-haSort.dir} : {k, dir: k==="name"? 1 : -1};
   renderHomeArm();
 });
-$("homeArmLoad").onclick=loadHomeArm;
+$("homeArmLoad").onclick=()=>loadHomeArm(true);     // the button means "re-read it all"
 $("homeArmDays").onchange=()=>{ if(homeArm) loadHomeArm() };
 
 
@@ -2560,7 +2574,12 @@ function showTab(t){
   $("settings").hidden = !inWar;
   $("switchWar").hidden = !inWar;
   $("vsline").hidden = !inWar;
-  if(dashTab==="faction"){ loadEvent(); if(!homeRows) loadHome(); if(!ocRaw) loadOC(); if(!homeArm) loadHomeArm(); renderFaction() }
+  if(dashTab==="faction"){
+    loadEvent().then(()=>mark("event")).catch(()=>{});
+    if(!homeRows) Promise.resolve(loadHome()).then(()=>mark("form")).catch(()=>{});
+    if(!ocRaw) Promise.resolve(loadOC()).then(()=>mark("OC")).catch(()=>{});
+    if(!homeArm) Promise.resolve(loadHomeArm()).then(()=>mark("armoury")).catch(()=>{});
+    renderFaction() }
   if(dashTab==="war" && !homeRows) loadHome();
   if(dashTab==="oc" && !ocRaw) loadOC();
   bindDashCharts();
@@ -2876,7 +2895,7 @@ function renderFaction(){
     + `the respect total for all wars sits in the footer. `
     + `A * means they joined partway through the crime range, so their days run from when they arrived. Former members are left out.`;
 }
-$("facReload").onclick=async()=>{ $("facProg").textContent="loading…"; await Promise.all([loadHome(), loadOC()]); $("facProg").textContent=""; renderFaction() };
+$("facReload").onclick=async()=>{ $("facProg").textContent="loading…"; await Promise.all([loadHome(true), loadOC(true)]); $("facProg").textContent=""; renderFaction() };
 $("facHead").addEventListener("click",e=>{
   const th=e.target.closest("th[data-k]"); if(!th) return;
   const k=th.dataset.k;
@@ -2927,9 +2946,15 @@ function ocSplit(c){
   const members=Math.round(money*pct/100);
   return {money, members, faction:money-members, respect:rew.respect||0, pct};
 }
-async function loadOC(){
+async function loadOC(force){
   const btn=$("ocLoad"); btn.disabled=true; $("ocProg").textContent="loading…";
   try{
+    const c = force? null : load(LS.oc);
+    if(c && c.at && now()-c.at < 900){                 // completed crimes do not move minute to minute
+      ocRaw=c; $("ocProg").textContent="";
+      renderOC(); bindDashCharts(); if(!$("facCard").hidden) renderFaction();
+      return;
+    }
     const [done, live, mem] = await Promise.all([
       api("/faction/crimes",{cat:"completed", limit:100}),
       api("/faction/crimes",{limit:50}),
@@ -2941,6 +2966,7 @@ async function loadOC(){
       memberDir[m.id]={name:m.name, pos:m.position||"", lvl:m.level||0, joined: dif==null? null : t-dif*86400};
     }
     ocRaw={ done:(done.crimes||[]), live:(live.crimes||[]), at:now() };
+    save(LS.oc, ocRaw);
     $("ocProg").textContent="";
     renderOC(); bindDashCharts(); if(!$("facCard").hidden) renderFaction();
   }catch(e){ $("ocProg").textContent=e.message }
@@ -3225,7 +3251,7 @@ $("octblBody").addEventListener("click",e=>{
   const td=e.target.closest("td.ocjump"); if(td) openOcMember(+td.dataset.oid);
 });
 
-$("ocLoad").onclick=loadOC;
+$("ocLoad").onclick=()=>loadOC(true);
 for(const id of ["ocFrom","ocTo"]) $(id).onchange=()=>{
   cfg.ocFrom=$("ocFrom").value; cfg.ocTo=$("ocTo").value; save(LS.cfg,cfg); renderOC();
 };
@@ -3468,6 +3494,11 @@ function ago(t){ const s=now()-t; if(s<90)return s+"s ago"; if(s<5400)return Mat
 function tsToLocalInput(t){ return new Date(t*1000).toISOString().slice(0,16) }
 
 /* ---------- boot ---------- */
+// Keep a stopwatch on the opening sequence. Working out why the page was slow
+// to load meant reading the code rather than looking at a number; now it shows.
+const bootT0 = Date.now(); const bootMarks = [];
+function mark(label){ bootMarks.push(label + " " + ((Date.now()-bootT0)/1000).toFixed(1) + "s");
+  const el=$("loadMeta"); if(el) el.textContent = " · load " + ((Date.now()-bootT0)/1000).toFixed(1) + "s (" + bootMarks.join(", ") + ")"; }
 (function boot(){
   if(cfg.key){
     $("apikey").value=cfg.key;
@@ -3479,7 +3510,7 @@ function tsToLocalInput(t){ return new Date(t*1000).toISOString().slice(0,16) }
       $("resumeWar").textContent = "Continue tracking " + (war.oppName||"last war") + " ⟶";
     }
     loadWarList()
-      .then(()=>{ $("dashTabs").hidden=false; renderHome(); renderHomeArm(); renderOC(); renderFaction();
+      .then(()=>{ mark("wars"); $("dashTabs").hidden=false; renderHome(); renderHomeArm(); renderOC(); renderFaction();
                   showTab(cfg.dashTab||dashTab); })
       .catch(e=>{ $("setup").hidden=false; showErr(e.message) });
   }
