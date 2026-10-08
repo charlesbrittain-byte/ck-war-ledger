@@ -59,6 +59,7 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .legend i{width:9px; height:9px; border-radius:50%; display:inline-block}
 .legend span.me{color:var(--text); border-color:var(--amber)}
 .foot{margin-top:22px; color:var(--faint); font-size:13px}
+.linkish{background:none; border:0; padding:4px 0 0; color:var(--dim); font-size:13px; text-decoration:underline; cursor:pointer; width:auto}
 .note{background:#181C21; border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin-top:10px; color:var(--dim); font-size:14px}
 .err{background:#3A2225; border:1px solid var(--down); color:#E8B9BC; border-radius:8px; padding:9px 11px; margin-top:10px; font-size:14px}
 @media (max-width:640px){ body{font-size:15.5px} .card{padding:11px 12px 13px} }
@@ -100,27 +101,31 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
   <div class="note" id="autoBox">
     <label style="display:flex; gap:9px; align-items:flex-start; cursor:pointer">
       <input type="checkbox" id="auto" style="margin-top:4px; width:auto">
-      <span><b>Let the clubhouse record for me</b> — your key is kept by the faction's tracker so it takes your
+      <span><b>Let the clubhouse record for me</b><span id="autoWhy"> — your key is kept by the faction's tracker so it takes your
       readings automatically: once when the event opens, every hour after that, and once at the end. No tapping, and your
       starting point is caught even if you are asleep. It is only ever used to read your own battle stats, only the
-      percentage is shared, and you can switch this off here at any time.</span>
+      percentage is shared, and you can switch this off here at any time.</span></span>
     </label>
     <div class="meta" id="autoState" style="margin-top:6px"></div>
+    <button id="autoMore" class="linkish" hidden>How it works</button>
   </div>
   <svg id="chart" class="chart" preserveAspectRatio="none"></svg>
   <div class="legend" id="legend"></div>
   <div class="tblwrap">
     <table>
-      <thead><tr><th class="rank">#</th><th>Member</th><th>Gain</th><th>Started</th></tr></thead>
+      <thead><tr><th class="rank">#</th><th>Member</th><th>Gain</th><th>Energy</th><th>Started</th></tr></thead>
       <tbody id="board"></tbody>
     </table>
   </div>
-  <p class="hint">Opting in above is the easy way: join any time, even before the event, and your starting point is
+  <p class="hint" id="smallprint">Opting in above is the easy way: join any time, even before the event, and your starting point is
     taken the moment it opens. Otherwise, highest <b>percentage</b> gain in total battle stats wins — so it is fair whether you are big or small.
     Only your percentage is shared: your actual stats never leave your browser, and nobody here can see them.
     <b>Tap once when the event opens</b> to set your starting point, and again at the end. Torn keeps no history of
     battle stats, so a gain can only be counted from the moment you first tap — tap late and only the rest of the
-    event counts for you, which the board shows beside your name.</p>
+    event counts for you, which the board shows beside your name.
+    <br><br><b>Energy</b> is what you spent getting the gains: Torn keeps no record of gym energy, so this counts the
+    energy you <i>bought</i> during the event — 250 per xanax, a full bar per energy refill. Natural regen can't be
+    counted, so treat it as effort spent, not a total.</p>
 </section>
 
 <p class="foot wrap"><span id="build" style="color:var(--faint)"></span> · Times are TCT. Your API key stays in this browser.</p>
@@ -129,9 +134,9 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 08:09";
+const BUILD = "2026-10-08 07:44";
 const $ = id => document.getElementById(id);
-const LS = { key:"ckc_key", me:"ckc_me" };
+const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe" };
 let me = null, lastData = null;
 
 $("build").textContent = "build " + BUILD;
@@ -173,11 +178,25 @@ async function myStats(){
   const b = basic && (basic.basic || basic.profile || basic);
   const id = b && (b.id ?? b.player_id);
   const name = (b && b.name) || "";
-  const ps = await torn("/user/personalstats", {cat:"battle_stats"});
-  const bs = ps && ps.personalstats && (ps.personalstats.battle_stats || ps.personalstats);
+  // cat=all carries the battle stats and the consumables in one call, so the
+  // energy figure costs nothing extra
+  const ps = await torn("/user/personalstats", {cat:"all"});
+  const p = (ps && ps.personalstats) || {};
+  const bs = p.battle_stats || p;
   const total = bs && (bs.total ?? ((bs.strength||0)+(bs.defense||0)+(bs.speed||0)+(bs.dexterity||0)));
   if(!id || !total) throw new Error("Couldn't read your stats — make sure the key is a Limited key for your own account.");
-  return {id, name, total};
+  // a refill is a full bar, so pricing one needs your maximum — read once and kept
+  let maxe = +load(LS.maxe) || 0;
+  if(!maxe){
+    const b = await torn("/user/bars").catch(()=>null);
+    const e = b && ((b.bars && b.bars.energy) || b.energy);
+    maxe = (e && e.maximum) || 0;
+    if(maxe) save(LS.maxe, maxe);
+  }
+  return {id, name, total, maxe,
+    xan: (p.drugs && p.drugs.xanax) || 0,
+    ref: (p.other && p.other.refills && p.other.refills.energy) || 0,
+    drk: (p.items && p.items.used && p.items.used.energy_drinks) || 0};
 }
 
 async function enrol(on){
@@ -185,7 +204,8 @@ async function enrol(on){
   u.searchParams.set("token", GAMES_TOKEN);
   u.searchParams.set(on? "enrol":"leave", "1");
   u.searchParams.set("id", me.id);
-  if(on){ u.searchParams.set("key", load(LS.key)||""); u.searchParams.set("name", me.name||"") }
+  if(on){ u.searchParams.set("key", load(LS.key)||""); u.searchParams.set("name", me.name||"");
+          if(me.maxe) u.searchParams.set("maxe", me.maxe) }
   const j = await (await fetch(u)).json();
   if(j.error) throw new Error(j.error);
   return j;
@@ -233,6 +253,17 @@ function drawChart(data){
     return `<span class="${mine?"me":""}"><i style="background:${LINE_COLOURS[i%LINE_COLOURS.length]}"></i>${esc(r.name)}${mine?" (you)":""}</span>`;
   }).join("");
 }
+// Energy spent is not a thing Torn records. Energy *bought* is: xanax at 250
+// each and refills at a full bar. Shown as effort, with the breakdown on hover.
+function fmtE(v){ return v>=10000? Math.round(v/1000)+"k" : v>0? v.toLocaleString() : "—" }
+function energyWhy(r){
+  const bits=[];
+  if(r.xan) bits.push(r.xan+" xanax (250 each)");
+  if(r.refills) bits.push(r.refills+" refill"+(r.refills>1?"s":"")+(r.maxE? " ("+r.maxE+" each)":""));
+  if(r.drinks) bits.push(r.drinks+" energy drink"+(r.drinks>1?"s":"")+" — not counted, they vary");
+  if(!r.refills && !r.maxE && r.xan) bits.push("refills can't be priced until they opt in");
+  return bits.length? "Energy bought during the event: "+bits.join(", ") : "No xanax or refills used since their first reading";
+}
 function render(data){
   const rows = data.board || [];
   const ev = data.event || {};
@@ -251,14 +282,16 @@ function render(data){
       + `<td class="rank">${i<3? `<span class="medal">${medals[i]}</span>` : (i+1)}</td>`
       + `<td>${esc(r.name||("["+r.id+"]"))}${mine? ' <span class="meta">you</span>':""}</td>`
       + `<td class="gain ${r.gain>0?"pos":"zero"}">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
+      + `<td class="meta" title="${esc(energyWhy(r))}">${fmtE(r.energy||0)}</td>`
       + `<td class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late" : "from the start"}</td></tr>`;
-  }).join("") : `<tr><td colspan="4" class="meta">Nobody has recorded yet — be first.</td></tr>`;
+  }).join("") : `<tr><td colspan="5" class="meta">Nobody has recorded yet — be first.</td></tr>`;
   $("firstNote").hidden = !(me && rows.some(r=>r.id===me.id && r.gain===0));
   if(typeof data.enrolled === "boolean"){
     $("auto").checked = data.enrolled;
     $("autoState").textContent = data.enrolled
       ? "On — the tracker is taking your readings; you do not need to tap."
       : "Off — you will need to tap Record yourself when the event opens.";
+    setSmallprint(data.enrolled);
   }
   drawChart(data);
   lastData = data;
@@ -285,7 +318,8 @@ $("record").onclick = async ()=>{
   try{
     me = await myStats();
     $("who").textContent = me.name;
-    const data = await board({id:me.id, name:me.name, total:me.total});
+    const data = await board({id:me.id, name:me.name, total:me.total,
+                              xan:me.xan||0, ref:me.ref||0, drk:me.drk||0, maxe:me.maxe||0});
     render(data);
     if(!data.open){ $("status").textContent = ""; showErr(data.event && data.event.from && data.now < data.event.from
         ? "The event hasn't opened yet." : "The event has finished — the board is final."); return }
@@ -304,10 +338,22 @@ $("auto").onchange = async ()=>{
     $("autoState").textContent = on
       ? "On — the tracker is taking your readings; you do not need to tap."
       : "Off — you will need to tap Record yourself when the event opens.";
+    setSmallprint(on);
     if(on && lastData && lastData.open){ await $("record").onclick() }   // catch a baseline now
   }catch(e){ showErr(e.message); $("auto").checked=!on }
   finally{ $("auto").disabled=false }
 };
+// Once you have signed up there is nothing left to decide, so the explanation
+// folds away behind a link. Reading it again is one tap.
+let showWhy = false;
+function setSmallprint(enrolled){
+  const fold = enrolled && !showWhy;
+  $("autoWhy").hidden = fold;
+  $("smallprint").hidden = fold;
+  $("autoMore").hidden = !enrolled;
+  $("autoMore").textContent = showWhy? "Hide the detail" : "How it works";
+}
+$("autoMore").onclick = ()=>{ showWhy = !showWhy; setSmallprint($("auto").checked) };
 $("refresh").onclick = async ()=>{
   try{ render(await board()); showErr("") }catch(e){ showErr(e.message) }
 };

@@ -203,6 +203,8 @@ td.name:hover{color:var(--amber)}
 .tl-tick{position:absolute; width:2px; z-index:2; box-shadow:0 0 0 1px rgba(10,12,14,.65)}
 .tl-tick.out{top:0; height:44%; background:var(--tick-out)}
 .tl-tick.in{bottom:0; height:44%; background:var(--tick-in)}
+/* stretch of war before the worker started sampling: hits are known, status isn't */
+.tl-gap{position:absolute; top:0; bottom:0; z-index:0; background:repeating-linear-gradient(135deg,#23282E 0 5px,#1C2024 5px 10px)}
 .tl-est{position:absolute; top:0; bottom:0; background:var(--tl-ehosp); opacity:.45; z-index:0}
 .tl-mark{position:absolute; top:0; bottom:0; width:2px; background:var(--amber); opacity:.9; z-index:3}
 /* armoury usage ticks: full-height so they read as events, not status */
@@ -880,7 +882,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-08 08:09</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-08 07:44</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -1669,8 +1671,12 @@ function renderTimelines(){
   const el=$("tlRows");
   const t1=scrubT;
   const [w0]=viewWin();
+  // Start at the war (or the zoomed window), never at the first snapshot: the
+  // attack log reaches back to the first hit even when recording began later,
+  // so cropping to snaps[0] threw away the opening of every war.
+  const t0 = w0;
   const hasSnaps = snaps.length && snaps[0].t < t1;
-  const t0 = hasSnaps ? Math.max(w0, snaps[0].t) : w0;
+  const gapTo = hasSnaps ? Math.min(snaps[0].t, t1) : 0;
   if(t1<=t0){ el.innerHTML=`<p class="meta">Nothing to show at this point of the timeline yet.</p>`; return }
   const span=t1-t0;
   const X=t=>100*(t-t0)/span;
@@ -1695,6 +1701,7 @@ function renderTimelines(){
   let html="";
   for(const id of ids){
     let bars="";
+    if(gapTo>t0) bars+=`<div class="tl-gap" style="left:0;width:${X(gapTo).toFixed(2)}%" title="no status recorded yet — hits only"></div>`;
     if(per[id]){
       const segs=per[id];
       for(let i=0;i<segs.length;i++){
@@ -1725,7 +1732,8 @@ function renderTimelines(){
   }
   el.innerHTML=html;
   $("tlHint").textContent = "Pinch to zoom, drag to move through the war. " + (hasSnaps
-    ? `Recording since ${fmtDT(snaps[0].t)} TCT. Bands are live status samples (every ${cfg.pMem}s while open); ticks are hits made (top, green) and taken (bottom, red).`
+    ? `Bands are live status samples (every ${cfg.pMem}s while open); ticks are hits made (top, green) and taken (bottom, red).`
+      + (gapTo>t0 ? ` Status recording only began at ${fmtDT(snaps[0].t)} TCT — the hatched stretch before it has hits but no status.` : "")
     : `No live status was recorded for this period, so this is rebuilt from the attack log: ticks are hits made (top, green) and taken (bottom, red); faded red bands estimate hospital stays after being hospitalised. Self-hosps and flights can't be recovered for past wars — a quiet band with no red ticks pre-terms is your turtle.`);
 }
 

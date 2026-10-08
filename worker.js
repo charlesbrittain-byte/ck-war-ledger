@@ -68,6 +68,7 @@ export default {
           const k = url.searchParams.get("key") || "";
           if (!k) return json({ error: "missing key" }, 400, cors);
           keys[id] = { key: k, name: (url.searchParams.get("name") || "").slice(0, 30), at: Math.floor(Date.now() / 1000) };
+          keys[id].maxE = +url.searchParams.get("maxe") || await maxEnergy(k);
         }
         await env.LEDGER.put("trainkeys", JSON.stringify(keys));
         return json({ ok: true, enrolled: !!keys[id] }, 200, cors);
@@ -92,23 +93,33 @@ export default {
       const total = +url.searchParams.get("total") || 0;
       if (id && total && open) {
         const name = (url.searchParams.get("name") || "").slice(0, 30);
-        const u = doc.users[id];
+        const read = { total, xan: +url.searchParams.get("xan") || 0,
+                       ref: +url.searchParams.get("ref") || 0, drk: +url.searchParams.get("drk") || 0 };
+        const maxE = +url.searchParams.get("maxe") || 0;
+        let u = doc.users[id];
         // first reading inside the window is the baseline, and it stays the
         // baseline — a later drop is a real loss, not a new start
-        if (!u) { doc.users[id] = { name, first: total, firstAt: now, last: total, lastAt: now, s: [] };
-                  pushSample(doc.users[id], now, total) }
-        else { u.name = name || u.name; u.last = total; u.lastAt = now; pushSample(u, now, total) }
+        if (!u) u = doc.users[id] = { name, first: total, firstAt: now, s: [] };
+        else u.name = name || u.name;
+        applyReading(u, now, read, maxE);
         await env.LEDGER.put(key, JSON.stringify(doc));
       }
 
       // percentages only: absolute battle stats stay private
-      const board = Object.entries(doc.users).map(([uid, u]) => ({
+      const board = Object.entries(doc.users).map(([uid, u]) => {
+        // counters are lifetime, so only the movement since their first reading
+        // belongs to this event
+        const xan = Math.max(0, (u.xan || 0) - (u.firstX || 0));
+        const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
+        const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
+        return {
         id: +uid, name: u.name,
         gain: u.first > 0 ? +(100 * (u.last - u.first) / u.first).toFixed(3) : 0,
+        energy: xan * 250 + ref * (u.maxE || 0), xan, refills: ref, drinks: drk, maxE: u.maxE || 0,
         since: u.firstAt, updated: u.lastAt,
         lateBy: ev.from ? Math.max(0, u.firstAt - ev.from) : 0,
         series: u.first > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / u.first).toFixed(3)]) : []
-      })).sort((a, b) => b.gain - a.gain);
+      }}).sort((a, b) => b.gain - a.gain);
       let enrolledMe = false;
       if (id) {
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
@@ -232,6 +243,42 @@ async function tickFriends(env, t, atWar) {
 // that can see their battle stats.
 // Keep a thinned history per member so the clubhouse can draw a line each.
 // Totals are stored but never served — the series goes out as percentages.
+// One call per member does it all: cat=all carries battle stats AND the
+// consumables, so the energy figure costs no extra API reads.
+function readTrainStats(j){
+  const ps = j && j.personalstats; if (!ps) return null;
+  const bs = ps.battle_stats || ps;
+  const total = bs.total ?? ((bs.strength || 0) + (bs.defense || 0) + (bs.speed || 0) + (bs.dexterity || 0));
+  if (!total) return null;
+  return { total,
+    xan: (ps.drugs && ps.drugs.xanax) || 0,
+    ref: (ps.other && ps.other.refills && ps.other.refills.energy) || 0,
+    drk: (ps.items && ps.items.used && ps.items.used.energy_drinks) || 0 };
+}
+
+// Torn records no gym energy anywhere, so "energy used" can only be the energy
+// a member *bought*: xanax at 250 each and energy refills at a full bar. Both
+// are lifetime counters, so the first reading inside the window is the zero and
+// everything after it is a delta. Natural regen is not counted — it cannot be.
+function applyReading(u, t, r, maxE){
+  if (maxE) u.maxE = maxE;
+  if (u.firstX == null) { u.firstX = r.xan; u.firstR = r.ref; u.firstD = r.drk }
+  u.xan = r.xan; u.ref = r.ref; u.drk = r.drk;
+  u.last = r.total; u.lastAt = t;
+  return pushSample(u, t, r.total);
+}
+
+// A refill is a full energy bar, so their maximum is needed to price it — the
+// one figure that is not in personalstats. Read once, when they opt in.
+async function maxEnergy(key){
+  try {
+    const r = await fetch("https://api.torn.com/v2/user/bars?key=" + encodeURIComponent(key) + "&comment=CKClubhouse");
+    const b = await r.json();
+    const e = (b.bars && b.bars.energy) || b.energy;
+    return (e && e.maximum) || 0;
+  } catch (e) { return 0 }
+}
+
 function pushSample(u, t, total){
   u.s = u.s || [];
   const last = u.s[u.s.length - 1];
@@ -254,25 +301,29 @@ async function tickTraining(env, t, atWar) {
   const ids = Object.keys(keys);
   if (!ids.length) { doc.nextPoll = t + 3600; await env.LEDGER.put("train", JSON.stringify(doc)); return }
   let changed = false;
+  let keysChanged = false;
   for (const id of ids) {
     try {
-      const r = await fetch("https://api.torn.com/v2/user/personalstats?cat=battle_stats&key="
+      // anyone who opted in before refills were priced needs their maximum once
+      if (keys[id].maxE == null) { keys[id].maxE = await maxEnergy(keys[id].key); keysChanged = true }
+      const r = await fetch("https://api.torn.com/v2/user/personalstats?cat=all&key="
         + encodeURIComponent(keys[id].key) + "&comment=CKClubhouse");
       const j = await r.json();
       if (j && j.error) continue;                       // a dead key should not stop the rest
-      const bs = j.personalstats && (j.personalstats.battle_stats || j.personalstats);
-      const total = bs && (bs.total ?? ((bs.strength || 0) + (bs.defense || 0) + (bs.speed || 0) + (bs.dexterity || 0)));
-      if (!total) continue;
+      const read = readTrainStats(j);
+      if (!read) continue;
       let u = doc.users[id];
-      if (!u) { u = doc.users[id] = { name: keys[id].name, first: total, firstAt: t, last: total, lastAt: t, s: [] }; changed = true }
-      else { if (u.last !== total) changed = true; u.last = total; u.lastAt = t; if (keys[id].name) u.name = keys[id].name }
-      pushSample(u, t, total);
+      if (!u) { u = doc.users[id] = { name: keys[id].name, first: read.total, firstAt: t, s: [] }; changed = true }
+      else { if (u.last !== read.total || u.xan !== read.xan || u.ref !== read.ref) changed = true;
+             if (keys[id].name) u.name = keys[id].name }
+      applyReading(u, t, read, keys[id].maxE);
     } catch (e) { /* skip and try again next time */ }
   }
   const nearEnd = ev.to - 120;
   doc.nextPoll = t >= nearEnd ? ev.to + 1 : Math.min(t + every, nearEnd);
   // a poll where nobody moved still has to remember when it ran, but that is
   // one write instead of one per member
+  if (keysChanged) await env.LEDGER.put("trainkeys", JSON.stringify(keys));
   await env.LEDGER.put("train", JSON.stringify(doc));
 }
 
