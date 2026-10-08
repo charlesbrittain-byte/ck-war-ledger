@@ -52,6 +52,12 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .pos{color:var(--up)} .zero{color:var(--faint)}
 .medal{font-size:17px}
 .tblwrap{overflow-x:auto; margin-top:4px}
+.chart{width:100%; height:190px; display:block; margin-top:12px}
+.legend{display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 4px; font-size:13px}
+.legend span{display:inline-flex; align-items:center; gap:5px; background:#181C21; border:1px solid var(--line);
+  border-radius:999px; padding:3px 10px; color:var(--dim)}
+.legend i{width:9px; height:9px; border-radius:50%; display:inline-block}
+.legend span.me{color:var(--text); border-color:var(--amber)}
 .foot{margin-top:22px; color:var(--faint); font-size:13px}
 .note{background:#181C21; border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin-top:10px; color:var(--dim); font-size:14px}
 .err{background:#3A2225; border:1px solid var(--down); color:#E8B9BC; border-radius:8px; padding:9px 11px; margin-top:10px; font-size:14px}
@@ -101,6 +107,8 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
     </label>
     <div class="meta" id="autoState" style="margin-top:6px"></div>
   </div>
+  <svg id="chart" class="chart" preserveAspectRatio="none"></svg>
+  <div class="legend" id="legend"></div>
   <div class="tblwrap">
     <table>
       <thead><tr><th class="rank">#</th><th>Member</th><th>Gain</th><th>Started</th></tr></thead>
@@ -121,7 +129,7 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-07 09:15";
+const BUILD = "2026-10-08 08:09";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me" };
 let me = null, lastData = null;
@@ -191,6 +199,40 @@ async function board(extra={}){
   return j;
 }
 
+const LINE_COLOURS=["#D9A036","#7FB069","#5E8CA8","#B06FE0","#E86FA8","#57B26A","#4C9BE0","#E0A45B","#8FD0C0","#D0555B"];
+function drawChart(data){
+  const svg=$("chart"), W=1000, H=190, padL=34, padR=12, padT=14, padB=22;
+  const ev=data.event||{}, rows=(data.board||[]).filter(r=>(r.series||[]).length);
+  if(!ev.from || !rows.length){ svg.innerHTML=""; $("legend").innerHTML=""; return }
+  const from=ev.from, to=Math.min(ev.to, Math.max(data.now||0, ev.from+60));
+  const span=Math.max(60, to-from);
+  let max=0; for(const r of rows) for(const [,v] of r.series) if(v>max) max=v;
+  max=Math.max(0.5, max*1.15);
+  const X=t=>padL+(W-padL-padR)*Math.min(1,Math.max(0,(t-from)/span));
+  const Y=v=>H-padB-(H-padT-padB)*(v/max);
+  let p="";
+  // a line per 1% so the scale is readable without axis labels everywhere
+  const step = max>8? 2 : max>3? 1 : 0.5;
+  for(let g=0; g<=max; g+=step){
+    p+=`<line x1="${padL}" x2="${W-padR}" y1="${Y(g).toFixed(1)}" y2="${Y(g).toFixed(1)}" stroke="#2A2F36" stroke-width="1"/>`;
+    p+=`<text x="${padL-5}" y="${(Y(g)+4).toFixed(1)}" fill="#5A626B" font-size="11" text-anchor="end">${g.toFixed(step<1?1:0)}%</text>`;
+  }
+  rows.forEach((r,i)=>{
+    const c=LINE_COLOURS[i%LINE_COLOURS.length];
+    const mine = me && r.id===me.id;
+    const pts=r.series.map(([t,v])=>[X(t),Y(v)]);
+    const d=pts.map((pt,j)=>(j?"L":"M")+pt[0].toFixed(1)+" "+pt[1].toFixed(1)).join(" ");
+    p+=`<path d="${d}" fill="none" stroke="${c}" stroke-width="${mine?3.2:2}" stroke-linejoin="round" stroke-linecap="round" opacity="${mine?1:.85}"/>`;
+    const last=pts[pts.length-1];
+    if(last) p+=`<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="${mine?4:3}" fill="${c}"><title>${esc(r.name)} +${r.gain.toFixed(2)}%</title></circle>`;
+  });
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  svg.innerHTML=p;
+  $("legend").innerHTML=rows.map((r,i)=>{
+    const mine = me && r.id===me.id;
+    return `<span class="${mine?"me":""}"><i style="background:${LINE_COLOURS[i%LINE_COLOURS.length]}"></i>${esc(r.name)}${mine?" (you)":""}</span>`;
+  }).join("");
+}
 function render(data){
   const rows = data.board || [];
   const ev = data.event || {};
@@ -218,6 +260,7 @@ function render(data){
       ? "On — the tracker is taking your readings; you do not need to tap."
       : "Off — you will need to tap Record yourself when the event opens.";
   }
+  drawChart(data);
   lastData = data;
 }
 
@@ -268,6 +311,11 @@ $("auto").onchange = async ()=>{
 $("refresh").onclick = async ()=>{
   try{ render(await board()); showErr("") }catch(e){ showErr(e.message) }
 };
+
+setInterval(async ()=>{
+  if($("main").hidden) return;
+  try{ render(await board()) }catch(e){}
+}, 120000);                                   // the worker reads every 5 minutes; this just keeps the view current
 
 (function boot(){
   const k = load(LS.key), m = load(LS.me);

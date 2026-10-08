@@ -72,6 +72,14 @@ export default {
         await env.LEDGER.put("trainkeys", JSON.stringify(keys));
         return json({ ok: true, enrolled: !!keys[id] }, 200, cors);
       }
+      if (url.searchParams.has("drop")) {          // leaders: remove one entry without wiping the board
+        if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
+        const d = +url.searchParams.get("drop") || 0;
+        const had = !!doc.users[d];
+        delete doc.users[d];
+        await env.LEDGER.put(key, JSON.stringify(doc));
+        return json({ ok: true, dropped: had }, 200, cors);
+      }
       if (url.searchParams.has("enrolled")) {          // leaders: who opted in, names only
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
@@ -87,8 +95,9 @@ export default {
         const u = doc.users[id];
         // first reading inside the window is the baseline, and it stays the
         // baseline — a later drop is a real loss, not a new start
-        if (!u) doc.users[id] = { name, first: total, firstAt: now, last: total, lastAt: now };
-        else { u.name = name || u.name; u.last = total; u.lastAt = now }
+        if (!u) { doc.users[id] = { name, first: total, firstAt: now, last: total, lastAt: now, s: [] };
+                  pushSample(doc.users[id], now, total) }
+        else { u.name = name || u.name; u.last = total; u.lastAt = now; pushSample(u, now, total) }
         await env.LEDGER.put(key, JSON.stringify(doc));
       }
 
@@ -97,14 +106,16 @@ export default {
         id: +uid, name: u.name,
         gain: u.first > 0 ? +(100 * (u.last - u.first) / u.first).toFixed(3) : 0,
         since: u.firstAt, updated: u.lastAt,
-        lateBy: ev.from ? Math.max(0, u.firstAt - ev.from) : 0
+        lateBy: ev.from ? Math.max(0, u.firstAt - ev.from) : 0,
+        series: u.first > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / u.first).toFixed(3)]) : []
       })).sort((a, b) => b.gain - a.gain);
       let enrolledMe = false;
       if (id) {
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
         enrolledMe = !!keys[id];
       }
-      return json({ event: ev, open: !!open, now, board, you: id || null, enrolled: enrolledMe }, 200, cors);
+      return json({ event: ev, open: !!open, now, board, you: id || null, enrolled: enrolledMe,
+                    nextPoll: doc.nextPoll || null, pollEvery: 300 }, 200, cors);
     }
 
     if (!isAdmin) return json({ error: "bad or missing token" }, 403, cors);
@@ -219,12 +230,26 @@ async function tickFriends(env, t, atWar) {
 // (the baseline nobody remembers to set), hourly after that, and once more just
 // before it closes. One call per member per hour, against their own key. Each call uses that member's own key — the only key
 // that can see their battle stats.
-async function tickTraining(env, t) {
+// Keep a thinned history per member so the clubhouse can draw a line each.
+// Totals are stored but never served — the series goes out as percentages.
+function pushSample(u, t, total){
+  u.s = u.s || [];
+  const last = u.s[u.s.length - 1];
+  if (last && last[1] === total) { last[0] = t; return false }   // no movement, just restamp
+  u.s.push([t, total]);
+  if (u.s.length > 160) u.s = u.s.filter((_, i) => i % 2 === 0 || i >= u.s.length - 60);
+  return true;
+}
+
+async function tickTraining(env, t, atWar) {
   const doc = await env.LEDGER.get("train", "json");
   if (!doc || !doc.event || !doc.event.from) return;
   const ev = doc.event;
   if (t < ev.from || t > ev.to) return;
   if (doc.nextPoll && t < doc.nextPoll) return;
+  // 5 minutes normally; back off to 15 while a war is recording, so the two
+  // together stay inside the free tier's 1,000 KV writes a day
+  const every = atWar ? 900 : 300;
   const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
   const ids = Object.keys(keys);
   if (!ids.length) { doc.nextPoll = t + 3600; await env.LEDGER.put("train", JSON.stringify(doc)); return }
@@ -238,14 +263,16 @@ async function tickTraining(env, t) {
       const bs = j.personalstats && (j.personalstats.battle_stats || j.personalstats);
       const total = bs && (bs.total ?? ((bs.strength || 0) + (bs.defense || 0) + (bs.speed || 0) + (bs.dexterity || 0)));
       if (!total) continue;
-      const u = doc.users[id];
-      if (!u) doc.users[id] = { name: keys[id].name, first: total, firstAt: t, last: total, lastAt: t };
-      else { u.last = total; u.lastAt = t; if (keys[id].name) u.name = keys[id].name }
-      changed = true;
+      let u = doc.users[id];
+      if (!u) { u = doc.users[id] = { name: keys[id].name, first: total, firstAt: t, last: total, lastAt: t, s: [] }; changed = true }
+      else { if (u.last !== total) changed = true; u.last = total; u.lastAt = t; if (keys[id].name) u.name = keys[id].name }
+      pushSample(u, t, total);
     } catch (e) { /* skip and try again next time */ }
   }
   const nearEnd = ev.to - 120;
-  doc.nextPoll = t >= nearEnd ? ev.to + 1 : Math.min(t + 3600, nearEnd);
+  doc.nextPoll = t >= nearEnd ? ev.to + 1 : Math.min(t + every, nearEnd);
+  // a poll where nobody moved still has to remember when it ran, but that is
+  // one write instead of one per member
   await env.LEDGER.put("train", JSON.stringify(doc));
 }
 
@@ -283,7 +310,7 @@ async function tick(env) {
   }
 
   await tickFriends(env, t, !!meta.active);
-  await tickTraining(env, t);
+  await tickTraining(env, t, !!meta.active);
 
   let act = meta.active;
   if (act && act.start > t) return;

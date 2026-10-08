@@ -467,6 +467,13 @@ details.settings summary{cursor:pointer}
     <button id="evSave" class="primary">Open event</button>
     <span class="meta" id="evProg"></span>
   </div>
+  <div class="row" id="evTiles" style="margin-top:12px; gap:20px"></div>
+  <div class="tblwrap" id="evBoardWrap" hidden style="margin-top:10px">
+    <table id="evtbl" style="min-width:470px">
+      <thead><tr><th>#</th><th style="text-align:left">Member</th><th>Gain</th><th style="text-align:left">Started</th><th style="text-align:left">Last read</th><th style="text-align:left">Recording</th></tr></thead>
+      <tbody id="evtblBody"></tbody>
+    </table>
+  </div>
   <div class="row" style="margin-top:10px"><div class="meta" id="evEnrolled"></div></div>
   <p class="hint">Sets the bracket for the members' page at <a href="games.html" style="color:var(--amber)">games.html</a>.
     Torn keeps no history of battle stats, so a gain only counts from a reading taken during the event. Members who opt
@@ -873,7 +880,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-07 09:15</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="buildStamp" style="color:var(--faint)">build 2026-10-08 08:09</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2726,19 +2733,50 @@ async function evCall(params){
 }
 function renderEvent(j){
   const ev=(j&&j.event)||{};
-  if(!ev.from){ $("evMeta").textContent="no event set"; return }
+  if(!ev.from){ $("evMeta").textContent="no event set"; $("evTiles").innerHTML=""; $("evBoardWrap").hidden=true; return }
   const now=Math.floor(Date.now()/1000);
+  const live = now>=ev.from && now<=ev.to;
   const state = now<ev.from? "opens "+fmtDT(ev.from) : now>ev.to? "finished "+fmtDT(ev.to) : "running until "+fmtDT(ev.to);
-  $("evMeta").textContent=(ev.name? ev.name+" · ":"")+state+(j.board? ` · ${j.board.length} taking part`:"");
+  $("evMeta").textContent=(ev.name? ev.name+" · ":"")+state;
   $("evName").value=ev.name||"";
-  evCall({enrolled:1}).then(e=>{
-    const list=(e.enrolled||[]).map(x=>esc(x.name||("["+x.id+"]")));
-    $("evEnrolled").innerHTML = list.length
-      ? `<b class="pos">${list.length}</b> opted in to automatic recording: <span class="meta">${list.join(", ")}</span>`
-      : `<span class="neg">Nobody has opted in yet</span> — without it they must tap Record themselves when the event opens.`;
-  }).catch(()=>{ $("evEnrolled").textContent="" });
   $("evFrom").value=tsToLocalInput(ev.from);
   $("evTo").value=tsToLocalInput(ev.to);
+
+  const rows=(j.board||[]);
+  const moving=rows.filter(r=>r.gain>0);
+  const avg=moving.length? moving.reduce((x,r)=>x+r.gain,0)/moving.length : 0;
+  const best=rows[0];
+  const stale=rows.filter(r=>now-r.updated>3*3600).length;
+  $("evTiles").innerHTML =
+      `<div class="octile"><b>${rows.length}</b><span>taking part · ${moving.length} moving</span></div>`
+    + `<div class="octile"><b class="${live?"pos":""}">${live? fmtLeft(Math.max(0,ev.to-now)) : "—"}</b><span>${live?"left to run":"not running"}</span></div>`
+    + `<div class="octile"><b class="pos">${best&&best.gain>0? "+"+best.gain.toFixed(2)+"%" : "—"}</b><span>leader${best&&best.gain>0? " · "+esc(best.name):""}</span></div>`
+    + `<div class="octile"><b>${avg? "+"+avg.toFixed(2)+"%" : "—"}</b><span>average of those moving</span></div>`
+    + (stale? `<div class="octile"><b class="neg">${stale}</b><span>not read in 3h</span></div>` : "");
+
+  $("evBoardWrap").hidden = !rows.length;
+  $("evtblBody").innerHTML = rows.map((r,i)=>
+      `<tr><td class="lvl">${i+1}</td><td style="text-align:left" class="name">${esc(r.name||("["+r.id+"]"))}</td>`
+    + `<td class="${r.gain>0?"pos":"zero"}"><b>${r.gain>0? "+"+r.gain.toFixed(2)+"%":"—"}</b></td>`
+    + `<td style="text-align:left" class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late":"from the start"}</td>`
+    + `<td style="text-align:left" class="${now-r.updated>3*3600?"neg":"meta"}">${ago(r.updated)}</td>`
+    + `<td style="text-align:left" class="meta" data-auto="${r.id}">·</td></tr>`).join("");
+
+  evCall({enrolled:1}).then(e=>{
+    const ids=new Set((e.enrolled||[]).map(x=>x.id));
+    for(const td of document.querySelectorAll("#evtblBody [data-auto]")){
+      const on=ids.has(+td.dataset.auto);
+      td.textContent = on? "auto" : "manual";
+      td.className = on? "pos" : "meta";
+    }
+    const names=(e.enrolled||[]).map(x=>esc(x.name||("["+x.id+"]")));
+    const byHand=rows.filter(r=>!ids.has(r.id)).length;
+    $("evEnrolled").innerHTML = names.length
+      ? `<b class="pos">${names.length}</b> opted in to automatic recording`
+        + (byHand? ` · <b class="neg">${byHand}</b> on the board are recording by hand` : "")
+        + ` <span class="meta">— ${names.join(", ")}</span>`
+      : `<span class="neg">Nobody has opted in yet</span> — without it they must tap Record themselves when the event opens.`;
+  }).catch(()=>{ $("evEnrolled").textContent="" });
 }
 async function loadEvent(){
   if(!cfg.syncUrl){ $("evMeta").textContent="set the worker URL in Polling & data first"; return }
