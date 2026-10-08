@@ -132,6 +132,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
       competition, so that is the point, but it is your call.</span>
     <div class="meta" id="autoState" style="margin-top:6px"></div>
     <button id="autoMore" class="linkish" hidden>How it works</button>
+    <button id="autoKey" class="linkish" style="margin-left:14px">Use a different key</button>
     <button id="autoStop" class="linkish" style="margin-left:14px" hidden>Stop recording me</button>
   </div>
   <svg id="chart" class="chart" preserveAspectRatio="none"></svg>
@@ -189,7 +190,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 15:51";
+const BUILD = "2026-10-08 16:04";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -429,7 +430,7 @@ $("connect").onclick = async ()=>{
     $("setup").hidden = true; $("main").hidden = false;
     const d = await board({hist:1});
     render(d);
-    if(!d.enrolled) await autoEnrol();
+    await autoEnrol(true);          // always re-register: the key may have changed
     if(d.open) await recordNow();                   // catch a baseline straight away
   }catch(e){ showErr(e.message) }
   finally{ $("connect").disabled = false }
@@ -458,8 +459,8 @@ async function recordNow(){
 // Connecting a key IS the decision to play, so there is nothing else to agree
 // to. Re-sending on every sign-in is harmless and keeps the stored name fresh.
 let enrolled = false;
-async function autoEnrol(){
-  if(!me || !load(LS.key) || load(LS.out)) return;
+async function autoEnrol(force){
+  if(!me || !load(LS.key) || (load(LS.out) && !force)) return;
   try{
     await enrol(true);
     enrolled = true;
@@ -512,6 +513,17 @@ function setSmallprint(enrolled){
   $("autoMore").textContent = showWhy? "Hide the detail" : "How it works";
 }
 $("autoMore").onclick = ()=>{ showWhy = !showWhy; setSmallprint(enrolled) };
+// Swapping key had no route at all: the join card hides itself once a key is
+// stored, so the only way out was clearing site data.
+$("autoKey").onclick = ()=>{
+  for(const k of [LS.key, LS.me, LS.maxe]) { try{ localStorage.removeItem(k) }catch(e){} }
+  me = null; enrolled = false;
+  placeAutoBox(false);                       // back inside #main, so it hides with it
+  $("key").value = ""; $("status").textContent = ""; showErr("");
+  $("setup").hidden = false; $("main").hidden = true;
+  $("alltime").hidden = true; $("pastWrap").hidden = true;
+  window.scrollTo({top:0});
+};
 $("refresh").onclick = async ()=>{
   try{ render(await board({hist:1})); showErr("") }catch(e){ showErr(e.message) }
 };
