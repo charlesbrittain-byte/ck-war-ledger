@@ -130,9 +130,10 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
       <tbody id="board"></tbody>
     </table>
   </div>
-  <p class="hint" id="estNote" hidden><b>Adjusted %</b> for this event is worked out from your starting
-    <i>total</i> rather than your four stats — the per-stat baseline wasn't being recorded when it opened. It only
-    differs for players at the cap on some stats but not others. Events from here on use the exact figure.</p>
+  <p class="hint" id="estNote" hidden><b>Adjusted %</b> for this event uses an <i>estimated</i> starting split:
+    per-stat recording only began part way through, so your four stats as they are now have been wound back to the
+    total you started on. It is exact for anyone under the cap, and close for everyone else. Events from here on
+    record the real split from the first second.</p>
   <p class="hint">Ranking is on <b>Adjusted %</b>. Gym gains scale with the stat up to 50M and are heavily dampened
     above it, so plain % gain punishes big players for being big. Adjusted caps each of your four stats at 50M before
     working out the percentage, which means a small player and a huge player are compared on the training they actually
@@ -174,7 +175,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 14:15";
+const BUILD = "2026-10-08 14:35";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;

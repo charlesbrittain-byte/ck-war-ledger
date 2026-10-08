@@ -121,7 +121,7 @@ export default {
         let u = doc.users[id];
         // first reading inside the window is the baseline, and it stays the
         // baseline — a later drop is a real loss, not a new start
-        if (!u) u = doc.users[id] = { name, first: total, firstAt: now, s: [] };
+        if (!u) u = doc.users[id] = { name, first: total, firstAt: now, s: [], fs: read.stats || null };
         else u.name = name || u.name;
         applyReading(u, now, read, maxE);
         await env.LEDGER.put(key, JSON.stringify(doc));
@@ -145,7 +145,7 @@ export default {
         return {
         id: +uid, name: u.name,
         gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
-        adj: scoreOf(u, g), exact: !!u.fs,
+        adj: scoreOf(u, g), exact: !!u.fs && !u.fsEst, split: !!u.ls,
         xan, refills: ref, cans: drk, boosters: bst,
         gymE: null, fhc: null,                      // log only — see logOk below
         since: u.firstAt, updated: u.lastAt,
@@ -359,9 +359,10 @@ async function psCat(key, cat){
 // everything after it is a delta. Natural regen is not counted — it cannot be.
 function applyReading(u, t, r, maxE){
   if (maxE) u.maxE = maxE;
-  // the baseline split is only ever written once, when the record is born —
-  // overwriting it later would quietly make "the start" mean today
-  if (r.stats && !u.fs) u.fs = r.stats;
+  // NEVER set u.fs here: "no split on file yet" is not the same as "this is the
+  // start". A record born before per-stat recording existed would otherwise
+  // adopt today's stats as its baseline, inflating the denominator and dragging
+  // the adjusted score BELOW the raw one. fs is written at birth, and nowhere else.
   if (r.stats) u.ls = r.stats;
   if (r.cons) {
     if (u.firstX == null) { u.firstX = r.cons.xan; u.firstR = r.cons.ref; u.firstD = r.cons.drk; u.firstB = r.cons.bst }
@@ -478,7 +479,8 @@ async function tickTraining(env, t, atWar) {
       const read = await readMember(keys[id].key, wantCons.has(id));
       if (read._error) continue;                      // a dead key must not stop the rest
       let u = doc.users[id];
-      if (!u) u = doc.users[id] = { name: keys[id].name, first: read.total, firstAt: t, s: [] };
+      if (!u) u = doc.users[id] = { name: keys[id].name, first: read.total, firstAt: t, s: [],
+                                    fs: read.stats || null };          // the baseline split, captured once
       else if (keys[id].name) u.name = keys[id].name;
       applyReading(u, t, read, keys[id].maxE);
     } catch (e) { /* skip and try again next time */ }
