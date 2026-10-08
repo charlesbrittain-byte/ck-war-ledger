@@ -131,10 +131,9 @@ export default {
       const board = Object.entries(doc.users).map(([uid, u]) => {
         // counters are lifetime, so only the movement since their first reading
         // belongs to this event
-        const xan = Math.max(0, (u.xan || 0) - (u.firstX || 0));
         const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
         const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
-        const bst = Math.max(0, (u.bst || 0) - (u.firstB || 0));
+        const xan = ((doc.arm && doc.arm.xan) || {})[uid] || 0;      // faction supply
         const g = (u.last || 0) - (u.first || 0);
         const den = denomOf(u), sc = Math.pow(den, PEXP) * Math.pow(REF, 1 - PEXP);
         // the chart follows the ranking, so it plots the adjusted score
@@ -146,7 +145,7 @@ export default {
         id: +uid, name: u.name,
         gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
         adj: scoreOf(u, g), exact: !!u.fs && !u.fsEst, split: !!u.ls,
-        xan, refills: ref, cans: drk, boosters: bst,
+        xan, refills: ref, cans: drk,
         gymE: null, fhc: null,                      // log only — see logOk below
         since: u.firstAt, updated: u.lastAt,
         lateBy: ev.from ? Math.max(0, u.firstAt - ev.from) : 0,
@@ -290,14 +289,13 @@ const HIST_KEY = "trainhist", HIST_MAX = 24, HIST_ROWS = 60;
 
 function finalBoard(doc){
   return Object.entries(doc.users || {}).map(([uid, u]) => {
-    const xan = Math.max(0, (u.xan || 0) - (u.firstX || 0));
-    const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
     const g = (u.last || 0) - (u.first || 0);
     return { id: +uid, name: u.name || "",
       gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw, kept for the detail view
       adj: scoreOf(u, g), exact: !!u.fs,
-      xan, refills: ref, cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
-      boosters: Math.max(0, (u.bst || 0) - (u.firstB || 0)) };
+      xan: ((doc.arm && doc.arm.xan) || {})[uid] || 0,
+      refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
+      cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)) };
   }).sort((a, b) => b.adj - a.adj).slice(0, HIST_ROWS);
 }
 
@@ -329,7 +327,7 @@ async function archiveEvent(env, doc){
    to bigger players. REF anchors the scale, so a player capped on all four
    stats scores the same at every P and everyone else rotates around them. */
 const CAP = 50000000;          // per stat
-const PEXP = 0.8;              // 1 = plain capped percentage; lower favours bigger players
+const PEXP = 0.85;             // 1 = plain capped percentage; lower favours bigger players
 const REF = 4 * CAP;           // the scale anchor: a player capped on all four
 
 function denomOf(u){
@@ -341,6 +339,43 @@ function scoreOf(u, gain){
   const d = denomOf(u);
   if (d <= 0) return 0;
   return +(100 * gain / (Math.pow(d, PEXP) * Math.pow(REF, 1 - PEXP))).toFixed(3);
+}
+
+/* Xanax comes from the faction armoury log rather than each member's own
+   counters. One call covers the whole faction, it reaches back to the start of
+   the event instead of to whenever we started counting, and it measures what
+   the faction actually handed out — which is the thing being given away. */
+const ARM_RE = /XID=(\d+)[^>]*>([^<]*)<\/a>\s*used one of the faction's (.+?) items?/i;
+
+async function tickArmoury(env, doc, t){
+  const ev = doc.event;
+  const a = doc.arm || (doc.arm = { xan: {}, ids: [], cursor: 0 });
+  const seen = new Set(a.ids || []);
+  // first pass walks back to the start of the event; later ones only pick up
+  // what has happened since
+  const since = a.cursor || ev.from;
+  const pages = a.cursor ? 3 : 12;
+  let to = t, newest = a.cursor || 0;
+  for (let i = 0; i < pages; i++) {
+    const j = await torn(env, "/faction/news?cat=armoryAction&limit=100&sort=DESC&from=" + since + "&to=" + to);
+    const list = j.news || [];
+    if (!list.length) break;
+    if (list[0].timestamp > newest) newest = list[0].timestamp;   // captured before `to` moves
+    for (const n of list) {
+      if (n.timestamp < ev.from) continue;
+      const nid = n.id != null ? String(n.id) : (n.timestamp + ":" + (n.text || "").slice(0, 40));
+      if (seen.has(nid)) continue;                 // ids, not timestamps: two can share a second
+      const m = ARM_RE.exec(n.text || "");
+      if (!m || !/xanax/i.test(m[3])) { seen.add(nid); continue }
+      a.xan[m[1]] = (a.xan[m[1]] || 0) + 1;
+      seen.add(nid);
+    }
+    const last = list[list.length - 1].timestamp;
+    if (list.length < 100 || last <= since) break;
+    to = last - 1;
+  }
+  a.cursor = newest;
+  a.ids = [...seen].slice(-400);
 }
 
 // One category per call — Torn rejects "cat=drugs,items,other". battle_stats is
@@ -370,11 +405,9 @@ function applyReading(u, t, r, maxE){
   if (r.cons) {
     // each counter gets its own guard. Sharing one meant that adding a counter
     // later left its baseline unset, and its "delta" was the lifetime total.
-    if (u.firstX == null) u.firstX = r.cons.xan;
     if (u.firstR == null) u.firstR = r.cons.ref;
     if (u.firstD == null) u.firstD = r.cons.drk;
-    if (u.firstB == null) u.firstB = r.cons.bst;
-    u.xan = r.cons.xan; u.ref = r.cons.ref; u.drk = r.cons.drk; u.bst = r.cons.bst;
+    u.ref = r.cons.ref; u.drk = r.cons.drk;
     u.fullAt = t;
   }
   u.last = r.total; u.lastAt = t;
@@ -392,12 +425,12 @@ async function readMember(key, withCons){
   if (!total) return { _error: "no battle stats" };
   const out = { total, stats };
   if (withCons) {
-    const [dg, it, ot] = await Promise.all([psCat(key, "drugs"), psCat(key, "items"), psCat(key, "other")]);
-    if (!dg._error && !it._error && !ot._error) out.cons = {
-      xan: (dg.drugs && dg.drugs.xanax) || 0,
+    // xanax used to be read here too; it comes from the faction armoury now, so
+    // this is two calls per member instead of three
+    const [it, ot] = await Promise.all([psCat(key, "items"), psCat(key, "other")]);
+    if (!it._error && !ot._error) out.cons = {
       ref: (ot.other && ot.other.refills && ot.other.refills.energy) || 0,
-      drk: (it.items && it.items.used && it.items.used.energy_drinks) || 0,
-      bst: (it.items && it.items.used && it.items.used.boosters) || 0 };
+      drk: (it.items && it.items.used && it.items.used.energy_drinks) || 0 };
   }
   return out;
 }
@@ -467,7 +500,7 @@ async function tickTraining(env, t, atWar) {
   // The free plan allows 50 subrequests per invocation. Battle stats cost one
   // per member and the consumables three, so the consumables rotate through
   // whoever is most overdue rather than everyone refreshing at once.
-  let budget = 40 - ids.length;
+  let budget = 40 - ids.length - 1;             // one left for the armoury feed
   const wantCons = new Set();
   const overdue = ids.filter(id => doc.users[id])
     .sort((a, b) => (doc.users[a].fullAt || 0) - (doc.users[b].fullAt || 0));
@@ -493,6 +526,8 @@ async function tickTraining(env, t, atWar) {
       applyReading(u, t, read, keys[id].maxE);
     } catch (e) { /* skip and try again next time */ }
   }
+
+  try { await tickArmoury(env, doc, t) } catch (e) { /* the stats matter more */ }
 
   if (over) {                       // the final reading is in: bank it and stop
     doc.locked = true;
