@@ -172,6 +172,7 @@ export default {
           gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
           adj: scoreOf(u, g), exact: !!u.fs, split: !!u.ls,
           xan: xanFor(doc, ev, uid, now),
+          own: Math.max(0, (u.xan || 0) - (u.firstX || 0)),
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
           cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
           since: u.firstAt, updated: u.lastAt,
@@ -358,6 +359,7 @@ function finalBoard(doc, ev){
       gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw, kept for the detail view
       adj: scoreOf(u, g), exact: !!u.fs,
       xan: xanFor(doc, ev, uid, now),
+      own: Math.max(0, (u.xan || 0) - (u.firstX || 0)),
       refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
       cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)) };
   }).sort((a, b) => b.adj - a.adj).slice(0, HIST_ROWS);
@@ -386,12 +388,18 @@ async function archiveEvent(env, doc, ev){
    to bigger players. REF anchors the scale, so a player capped on all four
    stats scores the same at every P and everyone else rotates around them. */
 const CAP = 50000000;          // per stat
+const TAIL = 0.03;             // what a point of stat ABOVE the cap is worth against one below
 const PEXP = 0.85;             // 1 = plain capped percentage; lower favours bigger players
 const REF = 4 * CAP;           // the scale anchor: a player capped on all four
 
+// A hard cap says stat above 50M counts for nothing, which flatters a very big
+// player enormously: 5.5B of stats would be priced at 200M. Torn dampens gains
+// up there, it does not stop them, so the excess still counts — at TAIL of what
+// a point below the cap is worth.
+function capped(v){ return Math.min(v, CAP) + Math.max(0, v - CAP) * TAIL }
+
 function denomOf(u){
-  if (u.fs) return (Math.min(u.fs.s || 0, CAP) + Math.min(u.fs.d || 0, CAP)
-                  + Math.min(u.fs.p || 0, CAP) + Math.min(u.fs.x || 0, CAP));
+  if (u.fs) return capped(u.fs.s || 0) + capped(u.fs.d || 0) + capped(u.fs.p || 0) + capped(u.fs.x || 0);
   return Math.min(u.first || 0, REF);     // no per-stat baseline on file: the fallback
 }
 function scoreOf(u, gain){
@@ -468,7 +476,8 @@ function applyReading(u, t, r, maxE){
     // later left its baseline unset, and its "delta" was the lifetime total.
     if (u.firstR == null) u.firstR = r.cons.ref;
     if (u.firstD == null) u.firstD = r.cons.drk;
-    u.ref = r.cons.ref; u.drk = r.cons.drk;
+    if (u.firstX == null) u.firstX = r.cons.xan;
+    u.ref = r.cons.ref; u.drk = r.cons.drk; u.xan = r.cons.xan;
     u.fullAt = t;
   }
   u.last = r.total; u.lastAt = t;
@@ -488,10 +497,11 @@ async function readMember(key, withCons){
   if (withCons) {
     // xanax used to be read here too; it comes from the faction armoury now, so
     // this is two calls per member instead of three
-    const [it, ot] = await Promise.all([psCat(key, "items"), psCat(key, "other")]);
-    if (!it._error && !ot._error) out.cons = {
+    const [it, ot, dg] = await Promise.all([psCat(key, "items"), psCat(key, "other"), psCat(key, "drugs")]);
+    if (!it._error && !ot._error && !dg._error) out.cons = {
       ref: (ot.other && ot.other.refills && ot.other.refills.energy) || 0,
-      drk: (it.items && it.items.used && it.items.used.energy_drinks) || 0 };
+      drk: (it.items && it.items.used && it.items.used.energy_drinks) || 0,
+      xan: (dg.drugs && dg.drugs.xanax) || 0 };
   }
   return out;
 }
