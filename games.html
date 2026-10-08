@@ -110,15 +110,13 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   </div>
   <div id="error" class="err" hidden></div>
   <div class="note" id="autoBox">
-    <label style="display:flex; gap:9px; align-items:flex-start; cursor:pointer">
-      <input type="checkbox" id="auto" style="margin-top:4px; width:auto">
-      <span><b>Let the clubhouse record for me</b><span id="autoWhy"> — your key is kept by the faction's tracker so it takes your
-      readings automatically: once when the event opens, every hour after that, and once at the end. No tapping, and your
-      starting point is caught even if you are asleep. It is only ever used to read your own battle stats, only the
-      percentage is shared, and you can switch this off here at any time.</span></span>
-    </label>
+    <b>The clubhouse records for you</b><span id="autoWhy"> — connecting your key is all it takes. The tracker reads
+      your stats for you: once when an event opens, regularly through it, and once at the end. No tapping, and your
+      starting point is caught even if you are asleep. Your key is only ever used to read your own battle stats, and
+      only the percentage is ever shared.</span>
     <div class="meta" id="autoState" style="margin-top:6px"></div>
     <button id="autoMore" class="linkish" hidden>How it works</button>
+    <button id="autoStop" class="linkish" style="margin-left:14px" hidden>Stop recording me</button>
   </div>
   <svg id="chart" class="chart" preserveAspectRatio="none"></svg>
   <div class="legend" id="legend"></div>
@@ -162,9 +160,9 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 08:55";
+const BUILD = "2026-10-08 13:46";
 const $ = id => document.getElementById(id);
-const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe" };
+const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
 
 $("build").textContent = "build " + BUILD;
@@ -244,6 +242,9 @@ async function enrol(on){
 async function board(extra={}){
   const u = new URL(WORKER + "/train");
   u.searchParams.set("token", GAMES_TOKEN);
+  // without an id the worker cannot say whether YOU are enrolled, and answers
+  // "no" — which is what used to switch the opt-in back off every two minutes
+  if(me && me.id && extra.id == null) u.searchParams.set("id", me.id);
   for(const [k,v] of Object.entries(extra)) u.searchParams.set(k,v);
   const r = await fetch(u); const j = await r.json();
   if(j.error) throw new Error(j.error);
@@ -361,10 +362,10 @@ function render(data){
   }).join("") : `<tr><td colspan="4" class="meta">Nobody has recorded yet — be first.</td></tr>`;
   $("firstNote").hidden = !(me && rows.some(r=>r.id===me.id && r.gain===0));
   if(typeof data.enrolled === "boolean"){
-    $("auto").checked = data.enrolled;
+    enrolled = data.enrolled;
     $("autoState").textContent = data.enrolled
       ? "On — the tracker is taking your readings; you do not need to tap."
-      : "Off — you will need to tap Record yourself when the event opens.";
+      : "Off — tap Record yourself, or connect your key again to switch it back on.";
     setSmallprint(data.enrolled);
   }
   drawChart(data);
@@ -379,6 +380,7 @@ $("connect").onclick = async ()=>{
   const k = $("key").value.trim();
   if(!k){ showErr("Paste your API key first."); return }
   save(LS.key, k);
+  try{ localStorage.removeItem(LS.out) }catch(e){}
   showErr("");
   $("connect").disabled = true;
   try{
@@ -386,7 +388,10 @@ $("connect").onclick = async ()=>{
     save(LS.me, {id:me.id, name:me.name});
     $("who").textContent = me.name;
     $("setup").hidden = true; $("main").hidden = false;
-    render(await board({hist:1}));
+    const d = await board({hist:1});
+    render(d);
+    if(!d.enrolled) await autoEnrol();
+    if(d.open) await $("record").onclick();          // catch a baseline straight away
   }catch(e){ showErr(e.message) }
   finally{ $("connect").disabled = false }
 };
@@ -407,19 +412,29 @@ $("record").onclick = async ()=>{
   finally{ $("record").disabled = false; setTimeout(()=>$("status").textContent="", 6000) }
 };
 
-$("auto").onchange = async ()=>{
-  if(!me){ $("auto").checked=false; return }
-  const on=$("auto").checked;
-  $("auto").disabled=true; showErr("");
+// Connecting a key IS the decision to play, so there is nothing else to agree
+// to. Re-sending on every sign-in is harmless and keeps the stored name fresh.
+let enrolled = false;
+async function autoEnrol(){
+  if(!me || !load(LS.key) || load(LS.out)) return;
   try{
-    await enrol(on);
-    $("autoState").textContent = on
-      ? "On — the tracker is taking your readings; you do not need to tap."
-      : "Off — you will need to tap Record yourself when the event opens.";
-    setSmallprint(on);
-    if(on && lastData && lastData.open){ await $("record").onclick() }   // catch a baseline now
-  }catch(e){ showErr(e.message); $("auto").checked=!on }
-  finally{ $("auto").disabled=false }
+    await enrol(true);
+    enrolled = true;
+    $("autoState").textContent = "On — the tracker is taking your readings; you do not need to tap.";
+    setSmallprint(true);
+  }catch(e){ /* the board read will show the real state */ }
+}
+$("autoStop").onclick = async ()=>{
+  if(!me) return;
+  $("autoStop").disabled=true; showErr("");
+  try{
+    await enrol(false);
+    save(LS.out, 1);
+    enrolled = false;
+    $("autoState").textContent = "Off — your key has been removed. Connect again to switch it back on.";
+    setSmallprint(false);
+  }catch(e){ showErr(e.message) }
+  finally{ $("autoStop").disabled=false }
 };
 // Once you have signed up there is nothing left to decide, so the explanation
 // folds away behind a link. Reading it again is one tap.
@@ -429,9 +444,10 @@ function setSmallprint(enrolled){
   $("autoWhy").hidden = fold;
   $("smallprint").hidden = fold;
   $("autoMore").hidden = !enrolled;
+  $("autoStop").hidden = !enrolled;
   $("autoMore").textContent = showWhy? "Hide the detail" : "How it works";
 }
-$("autoMore").onclick = ()=>{ showWhy = !showWhy; setSmallprint($("auto").checked) };
+$("autoMore").onclick = ()=>{ showWhy = !showWhy; setSmallprint(enrolled) };
 $("refresh").onclick = async ()=>{
   try{ render(await board({hist:1})); showErr("") }catch(e){ showErr(e.message) }
 };
@@ -447,7 +463,7 @@ setInterval(async ()=>{
   $("key").value = k;
   if(m){ me = m; $("who").textContent = m.name || "" }
   $("setup").hidden = true; $("main").hidden = false;
-  board({hist:1}).then(render).catch(e=>showErr(e.message));
+  board({hist:1}).then(d=>{ render(d); if(!d.enrolled) autoEnrol() }).catch(e=>showErr(e.message));
 })();
 </script>
 </body>
