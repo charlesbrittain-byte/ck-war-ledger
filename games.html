@@ -61,6 +61,12 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .foot{margin-top:22px; color:var(--faint); font-size:13px}
 a{color:var(--amber); text-decoration:none; border-bottom:1px solid rgba(217,160,54,.45)}
 a:hover{border-bottom-color:var(--amber)}
+.btn{display:inline-block; border:1px solid var(--line); border-radius:6px; padding:8px 16px; font-weight:600;
+  background:var(--panel2); color:var(--text)}
+.btn.primary{background:var(--amber); border-color:var(--amber); color:#1A1408}
+.btn.primary:hover{background:#E8AE41; border-bottom-color:#E8AE41}
+.step{display:inline-flex; align-items:center; justify-content:center; width:23px; height:23px; flex:none;
+  border-radius:50%; background:var(--panel2); border:1px solid var(--line); color:var(--dim); font-size:13px; font-weight:700}
 summary{cursor:pointer; list-style:none; display:flex; align-items:center; gap:9px; padding:2px 0}
 summary::-webkit-details-marker{display:none}
 summary::after{content:"▾"; color:var(--faint); font-size:13px; margin-left:auto; transition:transform .15s}
@@ -91,15 +97,19 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 
 <section id="setup" class="card">
   <h2>Join in</h2>
-  <div class="row">
-    <input id="key" type="password" placeholder="Paste your Limited API key" autocomplete="off" spellcheck="false" style="flex:1; min-width:200px; font-family:ui-monospace,monospace">
+  <p class="hint" style="margin-top:0">No account, no sign-up. Make a key, paste it in, and you are on the board.</p>
+  <div class="row" style="margin-top:11px">
+    <a class="btn primary" href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats" target="_blank" rel="noopener">1 &nbsp;Make my key &rsaquo;</a>
+    <span class="meta">opens Torn with the right boxes already ticked</span>
+  </div>
+  <div class="row" style="margin-top:11px">
+    <span class="step">2</span>
+    <input id="key" type="password" placeholder="Paste your Torn API key" autocomplete="off" spellcheck="false" style="flex:1; min-width:180px; font-family:ui-monospace,monospace">
     <button class="primary" id="connect">Connect</button>
   </div>
-  <p class="hint"><a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats" target="_blank" rel="noopener"><b>Make a key for this &rsaquo;</b></a> —
-    opens Torn with the right permissions already ticked (your basics, bars, personal stats and battle stats).
-    <br><a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats,log" target="_blank" rel="noopener">Or one that also shares your gym log &rsaquo;</a> —
-    the same, plus the energy you spent training and the FHCs you used, which get their own columns on the board. It
-    shares more of your account, so only if you are happy to.
+  <p class="hint"><a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats,log" target="_blank" rel="noopener">Prefer the version that also shares your gym log &rsaquo;</a>
+    — the same key plus the energy you spent training and the FHCs you used, which get their own columns on the board.
+    It shares more of your account, so only if you are happy to.
     <br><br>Either way it is a key you make yourself, stored only in this browser and only ever sent to api.torn.com.
     Nobody can read your battle stats but you — that is why you record your own.</p>
 </section>
@@ -179,7 +189,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 15:45";
+const BUILD = "2026-10-08 15:51";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -209,7 +219,7 @@ async function torn(path, params={}){
   if(j && j.error){
     const map={1:"That key looks empty.",2:"That API key isn't valid — check for typos.",
       5:"Torn is rate limiting — wait a minute and try again.",13:"That key is disabled through inactivity.",
-      14:"You've hit Torn's daily data limit — try again tomorrow.",16:"That key's access level is too low; a Limited key is enough.",
+      14:"You've hit Torn's daily data limit — try again tomorrow.",16:"That key can't see enough — use the Make my key button above.",
       18:"That key has been paused by its owner."};
     throw new Error(map[j.error.code] || (j.error.error+" (code "+j.error.code+")"));
   }
@@ -232,7 +242,7 @@ async function myStats(){
   const p = (ps && ps.personalstats) || {};
   const bs = p.battle_stats || p;
   const total = bs && (bs.total ?? ((bs.strength||0)+(bs.defense||0)+(bs.speed||0)+(bs.dexterity||0)));
-  if(!id || !total) throw new Error("Couldn't read your stats — make sure the key is a Limited key for your own account.");
+  if(!id || !total) throw new Error("Couldn't read your stats — make sure it is a key for your own account.");
   // a refill is a full bar, so pricing one needs your maximum — read once and kept
   let maxe = +load(LS.maxe) || 0;
   if(!maxe){
