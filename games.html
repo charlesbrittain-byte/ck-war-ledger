@@ -124,7 +124,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <div class="legend" id="legend"></div>
   <div class="tblwrap">
     <table>
-      <thead><tr><th class="rank">#</th><th>Member</th><th>Gain</th><th>Energy</th><th>Started</th></tr></thead>
+      <thead><tr><th class="rank">#</th><th>Member</th><th>Gain</th><th>Started</th></tr></thead>
       <tbody id="board"></tbody>
     </table>
   </div>
@@ -133,10 +133,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     Only your percentage is shared: your actual stats never leave your browser, and nobody here can see them.
     <b>Tap once when the event opens</b> to set your starting point, and again at the end. Torn keeps no history of
     battle stats, so a gain can only be counted from the moment you first tap — tap late and only the rest of the
-    event counts for you, which the board shows beside your name.
-    <br><br><b>Energy</b> is what you spent getting the gains: Torn keeps no record of gym energy, so this counts the
-    energy you <i>bought</i> during the event — 250 per xanax, a full bar per energy refill. Natural regen can't be
-    counted, so treat it as effort spent, not a total.</p>
+    event counts for you, which the board shows beside your name.</p>
 </section>
 
 <section id="alltime" class="card" hidden>
@@ -165,7 +162,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 08:53";
+const BUILD = "2026-10-08 08:55";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe" };
 let me = null, lastData = null, lastHist = null;
@@ -204,6 +201,9 @@ async function torn(path, params={}){
 
 // Each person reads their own battle stats with their own key — Torn will not
 // show them to anyone else, which is exactly why this is self-reported.
+// xan/ref/drk come back with the stats whether or not anything shows them, so
+// they are still recorded — the energy column was pulled, not the data behind
+// it. Nothing on the page reads them at the moment.
 async function myStats(){
   const basic = await torn("/user/basic").catch(()=>null);
   const b = basic && (basic.basic || basic.profile || basic);
@@ -285,17 +285,6 @@ function drawChart(data){
     return `<span class="${mine?"me":""}"><i style="background:${LINE_COLOURS[i%LINE_COLOURS.length]}"></i>${esc(r.name)}${mine?" (you)":""}</span>`;
   }).join("");
 }
-// Energy spent is not a thing Torn records. Energy *bought* is: xanax at 250
-// each and refills at a full bar. Shown as effort, with the breakdown on hover.
-function fmtE(v){ return v>=10000? Math.round(v/1000)+"k" : v>0? v.toLocaleString() : "—" }
-function energyWhy(r){
-  const bits=[];
-  if(r.xan) bits.push(r.xan+" xanax (250 each)");
-  if(r.refills) bits.push(r.refills+" refill"+(r.refills>1?"s":"")+(r.maxE? " ("+r.maxE+" each)":""));
-  if(r.drinks) bits.push(r.drinks+" energy drink"+(r.drinks>1?"s":"")+" — not counted, they vary");
-  if(!r.refills && !r.maxE && r.xan) bits.push("refills can't be priced until they opt in");
-  return bits.length? "Energy bought during the event: "+bits.join(", ") : "No xanax or refills used since their first reading";
-}
 /* ---------- all-time, built from the archived events ----------
    Medals before totals: a season table where winning matters, not a tally of
    who showed up most. An event with no gain recorded doesn't count for you. */
@@ -368,9 +357,8 @@ function render(data){
       + `<td class="rank">${i<3? `<span class="medal">${medals[i]}</span>` : (i+1)}</td>`
       + `<td>${esc(r.name||("["+r.id+"]"))}${mine? ' <span class="meta">you</span>':""}</td>`
       + `<td class="gain ${r.gain>0?"pos":"zero"}">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
-      + `<td class="meta" title="${esc(energyWhy(r))}">${fmtE(r.energy||0)}</td>`
       + `<td class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late" : "from the start"}</td></tr>`;
-  }).join("") : `<tr><td colspan="5" class="meta">Nobody has recorded yet — be first.</td></tr>`;
+  }).join("") : `<tr><td colspan="4" class="meta">Nobody has recorded yet — be first.</td></tr>`;
   $("firstNote").hidden = !(me && rows.some(r=>r.id===me.id && r.gain===0));
   if(typeof data.enrolled === "boolean"){
     $("auto").checked = data.enrolled;
