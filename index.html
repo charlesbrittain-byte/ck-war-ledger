@@ -460,6 +460,7 @@ details.settings summary{cursor:pointer}
     <h2 style="margin:0">Clubhouse event</h2>
     <div class="meta" id="evMeta"></div>
   </div>
+  <div class="row" id="evPick" style="margin-bottom:9px"></div>
   <div class="zoomrow">
     <span class="lbl">Name</span>
     <input id="evName" placeholder="Training weekend" style="min-width:150px">
@@ -468,12 +469,16 @@ details.settings summary{cursor:pointer}
     <span class="lbl">to</span>
     <input type="datetime-local" id="evTo">
     <button id="evEdit">Save changes</button>
-    <button id="evSave" class="primary">Open new event</button>
+    <button id="evClose">Close it</button>
+    <button id="evSave" class="primary">Open another</button>
     <span class="meta" id="evProg"></span>
   </div>
-  <p class="hint" style="margin-top:6px"><b>Save changes</b> edits the event that is running — rename it, or move the
-    finish line in or out — and leaves everyone's scores alone. The start can only be moved before it opens, because
-    shifting it afterwards would change what every baseline means. <b>Open new event</b> is the destructive one.</p>
+  <p class="hint" style="margin-top:6px"><b>Several events can run at once</b> — the chips above switch between them,
+    and a second event costs no extra API calls for members already in the first. <b>Open another</b> starts one
+    alongside whatever is already going, with its own board; <b>Close it</b> banks the selected one to the all-time
+    table and takes it off the members' page. <b>Save changes</b> renames the selected event or moves its finish line,
+    leaving everyone's scores alone — the start can only be moved before it opens, because shifting it afterwards
+    would change what every baseline means.</p>
   <div class="row" id="evTiles" style="margin-top:12px; gap:20px"></div>
   <div class="tblwrap" id="evBoardWrap" hidden style="margin-top:10px">
     <table id="evtbl" style="min-width:470px">
@@ -891,7 +896,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-08 16:16</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-08 16:35</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2767,10 +2772,20 @@ async function evCall(params){
   if(j.error) throw new Error(j.error);
   return j;
 }
+let evPicked=null, evLast=null;
 function renderEvent(j){
-  const ev=(j&&j.event)||{};
-  if(!ev.from){ $("evMeta").textContent="no event set"; $("evTiles").innerHTML=""; $("evBoardWrap").hidden=true; return }
+  evLast=j;
+  const all=(j&&j.events)||[];
+  const ev = all.find(e=>e.id===evPicked) || all.find(e=>e.open) || all[all.length-1] || {};
+  evPicked = ev.id || null;
   const now=Math.floor(Date.now()/1000);
+  $("evPick").innerHTML = all.length<2 ? "" : all.map(e=>
+    `<button class="mini ${e.id===ev.id?"primary":""}" data-pick="${esc(String(e.id))}">${esc(e.name||"Event")}`
+    + `<span class="meta"> · ${now<e.from?"soon":now>e.to?"done":"live"}</span></button>`).join("");
+  for(const b of $("evPick").querySelectorAll("[data-pick]")) b.onclick=()=>{ evPicked=b.dataset.pick; renderEvent(evLast) };
+  $("evClose").hidden = !ev.from;
+  if(!ev.from){ $("evMeta").textContent="no event set"; $("evTiles").innerHTML=""; $("evBoardWrap").hidden=true;
+                $("evPast").innerHTML=""; $("evEnrolled").textContent=""; return }
   const live = now>=ev.from && now<=ev.to;
   const state = now<ev.from? "opens "+fmtDT(ev.from) : now>ev.to? "finished "+fmtDT(ev.to) : "running until "+fmtDT(ev.to);
   $("evMeta").textContent=(ev.name? ev.name+" · ":"")+state;
@@ -2778,7 +2793,7 @@ function renderEvent(j){
   $("evFrom").value=tsToLocalInput(ev.from);
   $("evTo").value=tsToLocalInput(ev.to);
 
-  const rows=(j.board||[]);
+  const rows=(ev.board||[]);
   const sc=r=>(r.adj!=null? r.adj : r.gain)||0;
   const moving=rows.filter(r=>sc(r)>0);
   const avg=moving.length? moving.reduce((x,r)=>x+sc(r),0)/moving.length : 0;
@@ -2837,10 +2852,18 @@ async function loadEvent(){
   if(!cfg.syncUrl){ $("evMeta").textContent="set the worker URL in Polling & data first"; return }
   try{ renderEvent(await evCall({hist:1})) }catch(e){ $("evMeta").textContent=e.message }
 }
+$("evClose").onclick=async()=>{
+  if(!evPicked) return;
+  if(!confirm("Close this event? Its final scores are banked to the all-time board and it comes off the members' page.")) return;
+  $("evClose").disabled=true; $("evProg").textContent="closing…";
+  try{ await evCall({close:evPicked}); evPicked=null; renderEvent(await evCall({hist:1})); $("evProg").textContent="closed" }
+  catch(e){ $("evProg").textContent=e.message }
+  finally{ $("evClose").disabled=false; setTimeout(()=>$("evProg").textContent="",5000) }
+};
 $("evEdit").onclick=async()=>{
   const f=$("evFrom").value, t=$("evTo").value;
   if(!t){ $("evProg").textContent="pick an end time"; return }
-  const q={edit:1, to:Math.floor(new Date(t+"Z").getTime()/1000), name:$("evName").value.trim()};
+  const q={edit:1, ev:evPicked, to:Math.floor(new Date(t+"Z").getTime()/1000), name:$("evName").value.trim()};
   if(f) q.from=Math.floor(new Date(f+"Z").getTime()/1000);   // refused by the worker once it has started
   $("evEdit").disabled=true; $("evProg").textContent="saving…";
   try{
@@ -2850,7 +2873,7 @@ $("evEdit").onclick=async()=>{
   }catch(e){
     // moving the start of a running event is refused; the rest still applied
     if(/already started/.test(e.message)){
-      try{ await evCall({edit:1, to:q.to, name:q.name}); renderEvent(await evCall({hist:1}));
+      try{ await evCall({edit:1, ev:evPicked, to:q.to, name:q.name}); renderEvent(await evCall({hist:1}));
            $("evProg").textContent="saved (the start can't move now)" }
       catch(e2){ $("evProg").textContent=e2.message }
     } else $("evProg").textContent=e.message;
@@ -2862,11 +2885,12 @@ $("evSave").onclick=async()=>{
   if(!f||!t){ $("evProg").textContent="pick both times"; return }
   const from=Math.floor(new Date(f+"Z").getTime()/1000), to=Math.floor(new Date(t+"Z").getTime()/1000);
   if(to<=from){ $("evProg").textContent="the end must be after the start"; return }
-  if(!confirm("Open a NEW event? This clears the current leaderboard.\n\nTo change the one that is running, use Save changes instead.")) return;
+  if(!confirm("Open another event? It runs alongside anything already going, with its own board.")) return;
   $("evSave").disabled=true; $("evProg").textContent="saving…";
   try{
-    await evCall({set:1, from, to, name:$("evName").value.trim()});
-    renderEvent(await evCall({}));
+    const made=await evCall({set:1, from, to, name:$("evName").value.trim()});
+    evPicked = made && made.event && made.event.id;
+    renderEvent(await evCall({hist:1}));
     $("evProg").textContent="open";
   }catch(e){ $("evProg").textContent=e.message }
   finally{ $("evSave").disabled=false; setTimeout(()=>$("evProg").textContent="",5000) }

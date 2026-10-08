@@ -40,38 +40,39 @@ export default {
     if (url.pathname.endsWith("/train")) {
       if (!isAdmin && !isGames) return json({ error: "bad or missing token" }, 403, cors);
       const key = "train";
-      let doc = (await env.LEDGER.get(key, "json")) || { users: {}, event: {} };
+      let doc = migrate((await env.LEDGER.get(key, "json"))) || { events: [], readers: {}, armLog: [], armIds: [], armCur: 0 };
+      doc.events = doc.events || []; doc.readers = doc.readers || {};
       const now = Math.floor(Date.now() / 1000);
+      const save = () => env.LEDGER.put(key, JSON.stringify(doc));
 
-      // Leaders set the bracket. Torn keeps no history of battle stats — a
-      // timestamped request just returns today's figures — so a baseline only
-      // exists if someone recorded one while the event was running. Changing
-      // the window therefore starts a fresh board.
+      // Opening an event ADDS one. Several can run at once — they share the
+      // reading pass, so a second event costs no extra calls for members
+      // already in the first.
       if (url.searchParams.has("set") || url.searchParams.has("reset")) {
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const from = +url.searchParams.get("from") || now;
         const to = +url.searchParams.get("to") || (from + 2 * 86400);
-        // opening a different event banks the outgoing one first; reopening the
-        // same window is a do-over and must not bank a half-finished board
-        let banked = false;
-        if (!doc.event || doc.event.from !== from) banked = await archiveEvent(env, doc);
-        doc = { users: {}, event: { from, to, name: (url.searchParams.get("name") || "").slice(0, 40) } };
-        await env.LEDGER.put(key, JSON.stringify(doc));
-        return json({ ok: true, event: doc.event, banked }, 200, cors);
+        if (to <= from) return json({ error: "the end must be after the start" }, 400, cors);
+        const ev = { id: String(from) + "-" + Math.random().toString(36).slice(2, 6),
+                     name: (url.searchParams.get("name") || "").slice(0, 40),
+                     from, to, users: {}, locked: false, archived: false, keyTest: null };
+        doc.events.push(ev);
+        doc.nextPoll = 0;
+        await save();
+        return json({ ok: true, event: ev }, 200, cors);
       }
 
-      // Changing a running event without clearing it. Opening an event is the
-      // destructive one; this is for fixing a name or moving the finish line.
+      // Change a running event without clearing it.
       if (url.searchParams.has("edit")) {
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
-        const ev = doc.event;
-        if (!ev || !ev.from) return json({ error: "there is no event to edit" }, 400, cors);
+        const ev = evOf(doc, url.searchParams.get("ev")) || doc.events[0];
+        if (!ev) return json({ error: "there is no event to edit" }, 400, cors);
         if (url.searchParams.has("name")) ev.name = (url.searchParams.get("name") || "").slice(0, 40);
         if (url.searchParams.has("to")) {
           const to = +url.searchParams.get("to") || 0;
           if (to <= ev.from) return json({ error: "the end must be after the start" }, 400, cors);
           ev.to = to;
-          if (to > now) { doc.locked = false; delete doc.archived }   // reopened: let it record again
+          if (to > now) { ev.locked = false; ev.archived = false }     // reopened: let it record again
         }
         if (url.searchParams.has("from")) {
           const from = +url.searchParams.get("from") || 0;
@@ -79,11 +80,21 @@ export default {
           // everyone's baseline means, so it is only allowed before it opens.
           if (now >= ev.from) return json({ error: "it has already started — the start can't move now" }, 400, cors);
           if (from >= ev.to) return json({ error: "the start must be before the end" }, 400, cors);
-          ev.from = from; delete doc.keyTest;
+          ev.from = from; ev.keyTest = null;
         }
-        doc.nextPoll = 0;                      // take a fresh look at the schedule
-        await env.LEDGER.put(key, JSON.stringify(doc));
+        doc.nextPoll = 0;
+        await save();
         return json({ ok: true, event: ev }, 200, cors);
+      }
+
+      if (url.searchParams.has("close")) {          // leaders: bank an event and take it off the page
+        if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
+        const ev = evOf(doc, url.searchParams.get("close"));
+        if (!ev) return json({ error: "no such event" }, 404, cors);
+        const banked = ev.archived || await archiveEvent(env, doc, ev);
+        doc.events = doc.events.filter(e => e !== ev);
+        await save();
+        return json({ ok: true, banked }, 200, cors);
       }
 
       // Opting in: a member hands over their own key so the worker can take the
@@ -99,12 +110,6 @@ export default {
           if (!k) return json({ error: "missing key" }, 400, cors);
           keys[id] = { key: k, name: (url.searchParams.get("name") || "").slice(0, 30), at: Math.floor(Date.now() / 1000) };
           keys[id].maxE = +url.searchParams.get("maxe") || await maxEnergy(k);
-          // a custom key may grant log access without being a Full key; record
-          // what this one allows so the gym/FHC columns know who to ask
-          try {
-            const ki = await (await fetch("https://api.torn.com/v2/key/info?key=" + encodeURIComponent(k))).json();
-            keys[id].log = (ki.info && ki.info.log && ki.info.log.available) || [];
-          } catch (e) { keys[id].log = [] }
         }
         await env.LEDGER.put("trainkeys", JSON.stringify(keys));
         return json({ ok: true, enrolled: !!keys[id] }, 200, cors);
@@ -121,76 +126,83 @@ export default {
       if (url.searchParams.has("drop")) {          // leaders: remove one entry without wiping the board
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const d = +url.searchParams.get("drop") || 0;
-        const had = !!doc.users[d];
-        delete doc.users[d];
-        await env.LEDGER.put(key, JSON.stringify(doc));
+        const ev = evOf(doc, url.searchParams.get("ev"));
+        const targets = ev ? [ev] : doc.events;
+        let had = false;
+        for (const e of targets) if (e.users[d]) { delete e.users[d]; had = true }
+        await save();
         return json({ ok: true, dropped: had }, 200, cors);
       }
       if (url.searchParams.has("enrolled")) {          // leaders: who opted in, names only
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
-        return json({ enrolled: Object.entries(keys).map(([id, v]) => ({ id: +id, name: v.name, at: v.at,
-                      log: (v.log || []).length ? v.log : null })) }, 200, cors);
+        return json({ enrolled: Object.entries(keys).map(([id, v]) => ({ id: +id, name: v.name, at: v.at })) }, 200, cors);
       }
 
-      const ev = doc.event || {};
-      const open = ev.from && ev.to && now >= ev.from && now <= ev.to;
       const id = +url.searchParams.get("id") || 0;
       const total = +url.searchParams.get("total") || 0;
-      if (id && total && open) {
+      const openEvents = doc.events.filter(e => now >= e.from && now <= e.to);
+      if (id && total && openEvents.length) {
         const name = (url.searchParams.get("name") || "").slice(0, 30);
         const num = n => +url.searchParams.get(n) || 0;
         const read = { total };
         if (num("str") && num("def")) read.stats = { s: num("str"), d: num("def"), p: num("spd"), x: num("dex") };
-        if (url.searchParams.has("xan")) read.cons = { xan: num("xan"), ref: num("ref"), drk: num("drk"), bst: num("bst") };
-        const maxE = +url.searchParams.get("maxe") || 0;
-        let u = doc.users[id];
-        // first reading inside the window is the baseline, and it stays the
-        // baseline — a later drop is a real loss, not a new start
-        if (!u) u = doc.users[id] = { name, first: total, firstAt: now, s: [], fs: read.stats || null };
-        else u.name = name || u.name;
-        applyReading(u, now, read, maxE);
-        await env.LEDGER.put(key, JSON.stringify(doc));
+        if (url.searchParams.has("ref")) read.cons = { ref: num("ref"), drk: num("drk") };
+        for (const ev of openEvents) {
+          let u = ev.users[id];
+          // first reading inside the window is the baseline, and it stays the
+          // baseline — a later drop is a real loss, not a new start
+          if (!u) u = ev.users[id] = { name, first: total, firstAt: now, s: [], fs: read.stats || null };
+          else u.name = name || u.name;
+          applyReading(u, now, read, num("maxe"));
+        }
+        await save();
       }
 
-      // percentages only: absolute battle stats stay private
-      const board = Object.entries(doc.users).map(([uid, u]) => {
-        // counters are lifetime, so only the movement since their first reading
-        // belongs to this event
-        const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
-        const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
-        const xan = ((doc.arm && doc.arm.xan) || {})[uid] || 0;      // faction supply
+      const boardFor = ev => Object.entries(ev.users || {}).map(([uid, u]) => {
         const g = (u.last || 0) - (u.first || 0);
         const den = denomOf(u), sc = Math.pow(den, PEXP) * Math.pow(REF, 1 - PEXP);
         // the chart follows the ranking, so it plots the adjusted score
         const ser = sc > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / sc).toFixed(3)]) : [];
-        // boards recorded by the older build lost their baseline timestamp from
+        // boards recorded by an older build lost their baseline timestamp from
         // the series, but firstAt still has it — put the anchor back
         if (ser.length && u.firstAt && ser[0][0] > u.firstAt) ser.unshift([u.firstAt, 0]);
         return {
-        id: +uid, name: u.name,
-        gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
-        adj: scoreOf(u, g), exact: !!u.fs && !u.fsEst, split: !!u.ls,
-        xan, refills: ref, cans: drk,
-        since: u.firstAt, updated: u.lastAt,
-        lateBy: ev.from ? Math.max(0, u.firstAt - ev.from) : 0,
-        series: ser
-      }}).sort((a, b) => b.adj - a.adj);
+          id: +uid, name: u.name,
+          gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
+          adj: scoreOf(u, g), exact: !!u.fs, split: !!u.ls,
+          xan: xanFor(doc, ev, uid, now),
+          refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
+          cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
+          since: u.firstAt, updated: u.lastAt,
+          lateBy: Math.max(0, u.firstAt - ev.from),
+          series: ser
+        };
+      }).sort((a, b) => b.adj - a.adj);
+
       let enrolledMe = false;
       if (id) {
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
         enrolledMe = !!keys[id];
       }
-      // asked for only on load and on a manual refresh: the two-minute poll does
-      // not need it, and this saves a KV read on every tick of every open page
+      // asked for only on load and on a manual refresh: the poll does not need
+      // it, and this saves a KV read on every tick of every open page
       let history;
       if (url.searchParams.has("hist")) {
         const h = (await env.LEDGER.get(HIST_KEY, "json")) || { events: [] };
         history = h.events || [];
       }
-      return json({ event: ev, open: !!open, now, board, you: id || null, enrolled: enrolledMe,
-                    history, scoring: { cap: CAP, p: PEXP, ref: REF },
-                    locked: !!doc.locked, keyTest: isAdmin ? (doc.keyTest || null) : null,
+      const events = doc.events
+        .slice().sort((a, b) => a.from - b.from)
+        .map(ev => ({ id: ev.id, name: ev.name, from: ev.from, to: ev.to,
+                      open: now >= ev.from && now <= ev.to, locked: !!ev.locked,
+                      board: boardFor(ev), keyTest: isAdmin ? (ev.keyTest || null) : null }));
+      const first = events.find(e => e.open) || events[events.length - 1] || null;
+      return json({ events, now, you: id || null, enrolled: enrolledMe, history,
+                    scoring: { cap: CAP, p: PEXP, ref: REF },
+                    // what a page written before multiple events understands
+                    event: first ? { from: first.from, to: first.to, name: first.name } : {},
+                    open: !!(first && first.open), board: first ? first.board : [],
                     nextPoll: doc.nextPoll || null, pollEvery: 180 }, 200, cors);
     }
 
@@ -312,26 +324,48 @@ async function tickFriends(env, t, atWar) {
 // couple of dozen events stay small enough to send with every board read.
 const HIST_KEY = "trainhist", HIST_MAX = 24, HIST_ROWS = 60;
 
-function finalBoard(doc){
-  return Object.entries(doc.users || {}).map(([uid, u]) => {
+/* Several events can run at once — a training weekend and a side game, say.
+   They share one KV document (writes are the scarce thing, not space), one
+   reading pass per member, and one armoury feed; each event only differs by its
+   window and the baselines taken inside it. */
+function migrate(doc){
+  if (!doc) return doc;
+  if (doc.events) return doc;
+  doc.events = [];
+  if (doc.event && doc.event.from) doc.events.push({
+    id: String(doc.event.from), name: doc.event.name || "", from: doc.event.from, to: doc.event.to,
+    users: doc.users || {}, locked: !!doc.locked, archived: !!doc.archived, keyTest: doc.keyTest || null });
+  delete doc.event; delete doc.users; delete doc.locked; delete doc.archived; delete doc.keyTest; delete doc.arm;
+  doc.readers = {}; doc.armLog = []; doc.armIds = []; doc.armCur = 0;   // the armoury backfills itself
+  return doc;
+}
+function evOf(doc, id){ return (doc.events || []).find(e => String(e.id) === String(id)) }
+
+// Faction xanax is kept as one timestamped log, so any event — including one
+// created later — can count its own window out of it without re-reading Torn.
+function xanFor(doc, ev, uid, upto){
+  const hi = Math.min(ev.to, upto);
+  let n = 0;
+  for (const e of (doc.armLog || [])) if (String(e.u) === String(uid) && e.t >= ev.from && e.t <= hi) n++;
+  return n;
+}
+
+function finalBoard(doc, ev){
+  const now = Math.floor(Date.now() / 1000);
+  return Object.entries(ev.users || {}).map(([uid, u]) => {
     const g = (u.last || 0) - (u.first || 0);
     return { id: +uid, name: u.name || "",
       gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw, kept for the detail view
       adj: scoreOf(u, g), exact: !!u.fs,
-      xan: ((doc.arm && doc.arm.xan) || {})[uid] || 0,
+      xan: xanFor(doc, ev, uid, now),
       refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
       cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)) };
   }).sort((a, b) => b.adj - a.adj).slice(0, HIST_ROWS);
 }
 
-// Banked before a board is cleared, and again by the cron once an event closes,
-// so the all-time table does not depend on anyone remembering to do it. Keyed
-// on the event's start, so archiving the same event twice updates it instead of
-// adding a duplicate.
-async function archiveEvent(env, doc){
-  const ev = doc && doc.event;
+async function archiveEvent(env, doc, ev){
   if (!ev || !ev.from) return false;
-  const board = finalBoard(doc);
+  const board = finalBoard(doc, ev);
   if (!board.length) return false;
   const h = (await env.LEDGER.get(HIST_KEY, "json")) || { events: [] };
   h.events = (h.events || []).filter(e => e.from !== ev.from);
@@ -372,35 +406,37 @@ function scoreOf(u, gain){
    the faction actually handed out — which is the thing being given away. */
 const ARM_RE = /XID=(\d+)[^>]*>([^<]*)<\/a>\s*used one of the faction's (.+?) items?/i;
 
-async function tickArmoury(env, doc, t){
-  const ev = doc.event;
-  const a = doc.arm || (doc.arm = { xan: {}, ids: [], cursor: 0 });
-  const seen = new Set(a.ids || []);
-  // first pass walks back to the start of the event; later ones only pick up
-  // what has happened since
-  const since = a.cursor || ev.from;
-  const pages = a.cursor ? 3 : 12;
-  let to = t, newest = a.cursor || 0;
+// One call covers the whole faction and reaches back, so a new event can count
+// xanax from before it was created. Deduped on news id — two entries can share
+// a second — and the newest timestamp is read before the cursor walks back.
+async function tickArmoury(env, doc, t, earliest){
+  doc.armLog = doc.armLog || []; doc.armIds = doc.armIds || [];
+  const seen = new Set(doc.armIds);
+  const since = doc.armCur || earliest;
+  const pages = doc.armCur ? 3 : 12;
+  let to = t, newest = doc.armCur || 0;
   for (let i = 0; i < pages; i++) {
     const j = await torn(env, "/faction/news?cat=armoryAction&limit=100&sort=DESC&from=" + since + "&to=" + to);
     const list = j.news || [];
     if (!list.length) break;
-    if (list[0].timestamp > newest) newest = list[0].timestamp;   // captured before `to` moves
+    if (list[0].timestamp > newest) newest = list[0].timestamp;
     for (const n of list) {
-      if (n.timestamp < ev.from) continue;
+      if (n.timestamp < earliest) continue;
       const nid = n.id != null ? String(n.id) : (n.timestamp + ":" + (n.text || "").slice(0, 40));
-      if (seen.has(nid)) continue;                 // ids, not timestamps: two can share a second
-      const m = ARM_RE.exec(n.text || "");
-      if (!m || !/xanax/i.test(m[3])) { seen.add(nid); continue }
-      a.xan[m[1]] = (a.xan[m[1]] || 0) + 1;
+      if (seen.has(nid)) continue;
       seen.add(nid);
+      const m = ARM_RE.exec(n.text || "");
+      if (!m || !/xanax/i.test(m[3])) continue;
+      doc.armLog.push({ t: n.timestamp, u: m[1] });
     }
     const last = list[list.length - 1].timestamp;
     if (list.length < 100 || last <= since) break;
     to = last - 1;
   }
-  a.cursor = newest;
-  a.ids = [...seen].slice(-400);
+  doc.armCur = newest;
+  doc.armLog.sort((a, b) => a.t - b.t);
+  if (doc.armLog.length > 4000) doc.armLog = doc.armLog.slice(-4000);
+  doc.armIds = [...seen].slice(-600);
 }
 
 // One category per call — Torn rejects "cat=drugs,items,other". battle_stats is
@@ -490,80 +526,99 @@ function pushSample(u, t, total){
 }
 
 async function tickTraining(env, t, atWar) {
-  const doc = await env.LEDGER.get("train", "json");
-  if (!doc || !doc.event || !doc.event.from) return;
-  const ev = doc.event;
+  const doc = migrate(await env.LEDGER.get("train", "json"));
+  if (!doc || !doc.events || !doc.events.length) return;
   const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
   const ids = Object.keys(keys);
+  doc.readers = doc.readers || {};
+  let dirty = false, keysChanged = false;
 
-  // ---- before the start: nothing to record, but check the keys work ----
-  if (t < ev.from) {
-    if (ev.from - t <= 300 && !doc.keyTest && ids.length) {
+  // five minutes before any event opens, check everyone's key still works
+  for (const ev of doc.events) {
+    if (t < ev.from && ev.from - t <= 300 && !ev.keyTest && ids.length) {
       const bad = [];
       for (const id of ids) {
         const r = await psCat(keys[id].key, "battle_stats");
         if (r._error) bad.push({ id: +id, name: keys[id].name, why: r._error });
       }
-      doc.keyTest = { at: t, checked: ids.length, bad };
-      doc.nextPoll = ev.from;                 // the baseline is taken AT the start
-      await env.LEDGER.put("train", JSON.stringify(doc));
+      ev.keyTest = { at: t, checked: ids.length, bad };
+      dirty = true;
     }
+  }
+
+  const over = ev => t > ev.to;
+  const active = doc.events.filter(ev => t >= ev.from && !ev.locked);   // a just-ended event still owes a final reading
+  const schedule = () => {
+    const every = atWar ? 900 : 180;
+    let next = t + (active.length ? every : 3600);
+    for (const ev of doc.events) {
+      if (t < ev.from) next = Math.min(next, ev.from);
+      else if (!ev.locked && ev.to > t) next = Math.min(next, Math.min(t + every, ev.to + 1));
+    }
+    doc.nextPoll = next;
+  };
+
+  if (!active.length || !ids.length) {
+    schedule();
+    if (dirty || !active.length) await env.LEDGER.put("train", JSON.stringify(doc));
     return;
   }
 
-  // ---- after the end: one final reading, then lock ----
-  const over = t > ev.to;
-  if (over && doc.locked) return;
-
-  if (doc.nextPoll && t < doc.nextPoll && !over) return;
-
-  // 3 minutes normally; back off to 15 while a war is recording, so the two
-  // together stay inside the free tier's 1,000 KV writes a day
-  const every = atWar ? 900 : 180;
-  if (!ids.length) { doc.nextPoll = t + 3600; await env.LEDGER.put("train", JSON.stringify(doc)); return }
+  const mustFinal = active.some(over);
+  if (doc.nextPoll && t < doc.nextPoll && !mustFinal) {
+    if (dirty) await env.LEDGER.put("train", JSON.stringify(doc));
+    return;
+  }
 
   // The free plan allows 50 subrequests per invocation. Battle stats cost one
   // per member and the consumables three, so the consumables rotate through
-  // whoever is most overdue rather than everyone refreshing at once.
-  let budget = 40 - ids.length - 1;             // one left for the armoury feed
+  // whoever is most overdue rather than everyone refreshing at once. One
+  // reading pass serves every event a member is in.
+  let budget = 40 - ids.length - 1;
   const wantCons = new Set();
-  const overdue = ids.filter(id => doc.users[id])
-    .sort((a, b) => (doc.users[a].fullAt || 0) - (doc.users[b].fullAt || 0));
-  for (const id of ids) if (!doc.users[id] && budget >= 3) { wantCons.add(id); budget -= 3 }  // baselines first
-  if (over) for (const id of overdue) if (budget >= 3) { wantCons.add(id); budget -= 3 }      // and the final reading
-  else for (const id of overdue) {
+  for (const id of ids) if (!doc.readers[id] && budget >= 3) { wantCons.add(id); budget -= 3 }
+  const overdue = ids.filter(id => doc.readers[id]).sort((a, b) => (doc.readers[a].fullAt || 0) - (doc.readers[b].fullAt || 0));
+  for (const id of overdue) {
     if (budget < 3) break;
-    if (t - (doc.users[id].fullAt || 0) < 900) break;
+    if (!mustFinal && t - (doc.readers[id].fullAt || 0) < 900) break;
     wantCons.add(id); budget -= 3;
   }
 
-  let keysChanged = false;
+  const reads = {};
   for (const id of ids) {
     try {
-      // anyone who opted in before refills were priced needs their maximum once
       if (keys[id].maxE == null) { keys[id].maxE = await maxEnergy(keys[id].key); keysChanged = true }
-      const read = await readMember(keys[id].key, wantCons.has(id));
-      if (read._error) continue;                      // a dead key must not stop the rest
-      let u = doc.users[id];
-      if (!u) u = doc.users[id] = { name: keys[id].name, first: read.total, firstAt: t, s: [],
-                                    fs: read.stats || null };          // the baseline split, captured once
-      else if (keys[id].name) u.name = keys[id].name;
-      applyReading(u, t, read, keys[id].maxE);
+      const r = await readMember(keys[id].key, wantCons.has(id));
+      if (r._error) continue;                      // a dead key must not stop the rest
+      reads[id] = r;
+      doc.readers[id] = doc.readers[id] || { fullAt: 0 };
+      if (r.cons) doc.readers[id].fullAt = t;
     } catch (e) { /* skip and try again next time */ }
   }
 
-  try { await tickArmoury(env, doc, t) } catch (e) { /* the stats matter more */ }
-
-  if (over) {                       // the final reading is in: bank it and stop
-    doc.locked = true;
-    if (!doc.archived && await archiveEvent(env, doc)) doc.archived = true;
-  } else {
-    const nearEnd = ev.to - 120;
-    doc.nextPoll = t >= nearEnd ? ev.to + 1 : Math.min(t + every, nearEnd);
+  for (const ev of active) {
+    for (const [id, r] of Object.entries(reads)) {
+      let u = ev.users[id];
+      if (!u) u = ev.users[id] = { name: keys[id].name, first: r.total, firstAt: t, s: [],
+                                   fs: r.stats || null };          // the baseline split, captured once
+      else if (keys[id].name) u.name = keys[id].name;
+      applyReading(u, t, r, keys[id].maxE);
+    }
   }
-  // a poll where nobody moved still has to remember when it ran, but that is
-  // one write instead of one per member
+
+  try { await tickArmoury(env, doc, t, Math.min(...active.map(e => e.from))) }
+  catch (e) { /* the stats matter more */ }
+
+  for (const ev of active) {
+    if (!over(ev)) continue;
+    ev.locked = true;                               // the final reading is in
+    if (!ev.archived && await archiveEvent(env, doc, ev)) ev.archived = true;
+  }
+
+  schedule();
   if (keysChanged) await env.LEDGER.put("trainkeys", JSON.stringify(keys));
+  // a poll where nobody moved still has to remember when it ran, but that is
+  // one write for every event at once rather than one each
   await env.LEDGER.put("train", JSON.stringify(doc));
 }
 
