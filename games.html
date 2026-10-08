@@ -59,6 +59,8 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .legend i{width:9px; height:9px; border-radius:50%; display:inline-block}
 .legend span.me{color:var(--text); border-color:var(--amber)}
 .foot{margin-top:22px; color:var(--faint); font-size:13px}
+a{color:var(--amber); text-decoration:none; border-bottom:1px solid rgba(217,160,54,.45)}
+a:hover{border-bottom-color:var(--amber)}
 summary{cursor:pointer; list-style:none; display:flex; align-items:center; gap:9px; padding:2px 0}
 summary::-webkit-details-marker{display:none}
 summary::after{content:"▾"; color:var(--faint); font-size:13px; margin-left:auto; transition:transform .15s}
@@ -94,9 +96,12 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     <button class="primary" id="connect">Connect</button>
   </div>
   <p class="hint"><a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats" target="_blank" rel="noopener"><b>Make a key for this &rsaquo;</b></a> —
-    opens Torn with the right permissions already ticked (your basics, bars, personal stats and battle stats). Or use any
-    <b>Limited</b> key from torn.com &rarr; Settings &rarr; API key. It is stored only in this browser and only ever sent
-    to api.torn.com. Nobody can read your battle stats but you — that is why you record your own.</p>
+    opens Torn with the right permissions already ticked (your basics, bars, personal stats and battle stats).
+    <br><a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats,log" target="_blank" rel="noopener">Or one that also shares your gym log &rsaquo;</a> —
+    the same, plus the energy you spent training and the FHCs you used, which get their own columns on the board. It
+    shares more of your account, so only if you are happy to.
+    <br><br>Either way it is a key you make yourself, stored only in this browser and only ever sent to api.torn.com.
+    Nobody can read your battle stats but you — that is why you record your own.</p>
 </section>
 
 <section id="main" class="card" hidden>
@@ -174,7 +179,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 15:39";
+const BUILD = "2026-10-08 15:45";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
