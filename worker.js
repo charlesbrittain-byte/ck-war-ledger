@@ -60,6 +60,32 @@ export default {
         return json({ ok: true, event: doc.event, banked }, 200, cors);
       }
 
+      // Changing a running event without clearing it. Opening an event is the
+      // destructive one; this is for fixing a name or moving the finish line.
+      if (url.searchParams.has("edit")) {
+        if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
+        const ev = doc.event;
+        if (!ev || !ev.from) return json({ error: "there is no event to edit" }, 400, cors);
+        if (url.searchParams.has("name")) ev.name = (url.searchParams.get("name") || "").slice(0, 40);
+        if (url.searchParams.has("to")) {
+          const to = +url.searchParams.get("to") || 0;
+          if (to <= ev.from) return json({ error: "the end must be after the start" }, 400, cors);
+          ev.to = to;
+          if (to > now) { doc.locked = false; delete doc.archived }   // reopened: let it record again
+        }
+        if (url.searchParams.has("from")) {
+          const from = +url.searchParams.get("from") || 0;
+          // Moving the start of a running event would silently redefine what
+          // everyone's baseline means, so it is only allowed before it opens.
+          if (now >= ev.from) return json({ error: "it has already started — the start can't move now" }, 400, cors);
+          if (from >= ev.to) return json({ error: "the start must be before the end" }, 400, cors);
+          ev.from = from; delete doc.keyTest;
+        }
+        doc.nextPoll = 0;                      // take a fresh look at the schedule
+        await env.LEDGER.put(key, JSON.stringify(doc));
+        return json({ ok: true, event: ev }, 200, cors);
+      }
+
       // Opting in: a member hands over their own key so the worker can take the
       // readings for them. Keys live in their own KV entry and are never served
       // by any endpoint — not to members, not to leaders.
@@ -146,7 +172,6 @@ export default {
         gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
         adj: scoreOf(u, g), exact: !!u.fs && !u.fsEst, split: !!u.ls,
         xan, refills: ref, cans: drk,
-        gymE: null, fhc: null,                      // log only — see logOk below
         since: u.firstAt, updated: u.lastAt,
         lateBy: ev.from ? Math.max(0, u.firstAt - ev.from) : 0,
         series: ser

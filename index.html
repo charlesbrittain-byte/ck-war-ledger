@@ -140,6 +140,7 @@ label.inl{color:var(--dim); font-size:14px; display:flex; align-items:center; ga
 .bigchain .who{color:var(--dim); font-size:13.5px; margin-top:4px; line-height:1.4}
 .bigchain .who b{color:var(--text); font-weight:600}
 @media (max-width:760px){ .twocol{grid-template-columns:minmax(0,1fr)} }
+.mini{font-size:13px; padding:3px 10px}
 .octile{display:flex; flex-direction:column; gap:1px}
 .octile b{font-size:20px; font-weight:700}
 .occhart{width:100%; height:150px; display:block; margin-top:12px}
@@ -466,17 +467,25 @@ details.settings summary{cursor:pointer}
     <input type="datetime-local" id="evFrom">
     <span class="lbl">to</span>
     <input type="datetime-local" id="evTo">
-    <button id="evSave" class="primary">Open event</button>
+    <button id="evEdit">Save changes</button>
+    <button id="evSave" class="primary">Open new event</button>
     <span class="meta" id="evProg"></span>
   </div>
+  <p class="hint" style="margin-top:6px"><b>Save changes</b> edits the event that is running — rename it, or move the
+    finish line in or out — and leaves everyone's scores alone. The start can only be moved before it opens, because
+    shifting it afterwards would change what every baseline means. <b>Open new event</b> is the destructive one.</p>
   <div class="row" id="evTiles" style="margin-top:12px; gap:20px"></div>
   <div class="tblwrap" id="evBoardWrap" hidden style="margin-top:10px">
     <table id="evtbl" style="min-width:470px">
-      <thead><tr><th>#</th><th style="text-align:left">Member</th><th>Gain</th><th style="text-align:left">Started</th><th style="text-align:left">Last read</th><th style="text-align:left">Recording</th></tr></thead>
+      <thead><tr><th>#</th><th style="text-align:left">Member</th><th>Adjusted</th><th>Raw</th><th style="text-align:left">Started</th><th style="text-align:left">Last read</th><th style="text-align:left">Recording</th></tr></thead>
       <tbody id="evtblBody"></tbody>
     </table>
   </div>
   <div class="row" style="margin-top:10px"><div class="meta" id="evEnrolled"></div></div>
+  <details style="margin-top:12px; border-top:1px solid var(--line)">
+    <summary style="cursor:pointer; padding:9px 0; color:var(--dim)">Past events <span id="evPastN"></span></summary>
+    <div id="evPast"></div>
+  </details>
   <p class="hint">Sets the bracket for the members' page at <a href="games.html" style="color:var(--amber)">games.html</a>.
     Torn keeps no history of battle stats, so a gain only counts from a reading taken during the event. Members who opt
     in on that page have their readings taken for them — at the open, hourly after that, and at the close — so their
@@ -882,7 +891,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-08 15:26</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-08 16:16</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2770,21 +2779,23 @@ function renderEvent(j){
   $("evTo").value=tsToLocalInput(ev.to);
 
   const rows=(j.board||[]);
-  const moving=rows.filter(r=>r.gain>0);
-  const avg=moving.length? moving.reduce((x,r)=>x+r.gain,0)/moving.length : 0;
+  const sc=r=>(r.adj!=null? r.adj : r.gain)||0;
+  const moving=rows.filter(r=>sc(r)>0);
+  const avg=moving.length? moving.reduce((x,r)=>x+sc(r),0)/moving.length : 0;
   const best=rows[0];
   const stale=rows.filter(r=>now-r.updated>3*3600).length;
   $("evTiles").innerHTML =
       `<div class="octile"><b>${rows.length}</b><span>taking part · ${moving.length} moving</span></div>`
     + `<div class="octile"><b class="${live?"pos":""}">${live? fmtLeft(Math.max(0,ev.to-now)) : "—"}</b><span>${live?"left to run":"not running"}</span></div>`
-    + `<div class="octile"><b class="pos">${best&&best.gain>0? "+"+best.gain.toFixed(2)+"%" : "—"}</b><span>leader${best&&best.gain>0? " · "+esc(best.name):""}</span></div>`
+    + `<div class="octile"><b class="pos">${best&&sc(best)>0? "+"+sc(best).toFixed(2)+"%" : "—"}</b><span>leader${best&&sc(best)>0? " · "+esc(best.name):""}</span></div>`
     + `<div class="octile"><b>${avg? "+"+avg.toFixed(2)+"%" : "—"}</b><span>average of those moving</span></div>`
     + (stale? `<div class="octile"><b class="neg">${stale}</b><span>not read in 3h</span></div>` : "");
 
   $("evBoardWrap").hidden = !rows.length;
   $("evtblBody").innerHTML = rows.map((r,i)=>
       `<tr><td class="lvl">${i+1}</td><td style="text-align:left" class="name">${esc(r.name||("["+r.id+"]"))}</td>`
-    + `<td class="${r.gain>0?"pos":"zero"}"><b>${r.gain>0? "+"+r.gain.toFixed(2)+"%":"—"}</b></td>`
+    + `<td class="${sc(r)>0?"pos":"zero"}"><b>${sc(r)>0? "+"+sc(r).toFixed(2)+"%":"—"}</b></td>`
+    + `<td class="meta">${r.gain>0? "+"+r.gain.toFixed(2)+"%":"—"}</td>`
     + `<td style="text-align:left" class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late":"from the start"}</td>`
     + `<td style="text-align:left" class="${now-r.updated>3*3600?"neg":"meta"}">${ago(r.updated)}</td>`
     + `<td style="text-align:left" class="meta" data-auto="${r.id}">·</td></tr>`).join("");
@@ -2804,17 +2815,54 @@ function renderEvent(j){
         + ` <span class="meta">— ${names.join(", ")}</span>`
       : `<span class="neg">Nobody has opted in yet</span> — without it they must tap Record themselves when the event opens.`;
   }).catch(()=>{ $("evEnrolled").textContent="" });
+
+  const hist=j.history||[];
+  $("evPastN").textContent = hist.length? "("+hist.length+")" : "(none yet)";
+  $("evPast").innerHTML = hist.length? hist.map(h=>{
+    const b=(h.board||[]).filter(r=>((r.adj!=null?r.adj:r.gain)||0)>0);
+    const w=b[0], ws=w? ((w.adj!=null?w.adj:w.gain)||0) : 0;
+    return `<div class="row" style="justify-content:space-between; border-top:1px solid var(--line); padding:7px 0">`
+      + `<span>${esc(h.name||"Event")} <span class="meta">${fmtDT(h.from)} – ${fmtDT(h.to)} · ${b.length} took part`
+      + (w? ` · won by ${esc(w.name)} +${ws.toFixed(2)}%` : " · nobody scored") + `</span></span>`
+      + `<button data-unbank="${h.from}" class="mini">Remove</button></div>`;
+  }).join("") : `<p class="meta" style="padding:8px 0">Events are banked here when they finish, or when you open the next one.</p>`;
+  for(const b of $("evPast").querySelectorAll("[data-unbank]")) b.onclick=async()=>{
+    if(!confirm("Remove this event from the all-time board? The scores in it are lost.")) return;
+    b.disabled=true;
+    try{ await evCall({unbank:b.dataset.unbank}); renderEvent(await evCall({hist:1})) }
+    catch(e){ $("evProg").textContent=e.message; b.disabled=false }
+  };
 }
 async function loadEvent(){
   if(!cfg.syncUrl){ $("evMeta").textContent="set the worker URL in Polling & data first"; return }
-  try{ renderEvent(await evCall({})) }catch(e){ $("evMeta").textContent=e.message }
+  try{ renderEvent(await evCall({hist:1})) }catch(e){ $("evMeta").textContent=e.message }
 }
+$("evEdit").onclick=async()=>{
+  const f=$("evFrom").value, t=$("evTo").value;
+  if(!t){ $("evProg").textContent="pick an end time"; return }
+  const q={edit:1, to:Math.floor(new Date(t+"Z").getTime()/1000), name:$("evName").value.trim()};
+  if(f) q.from=Math.floor(new Date(f+"Z").getTime()/1000);   // refused by the worker once it has started
+  $("evEdit").disabled=true; $("evProg").textContent="saving…";
+  try{
+    await evCall(q);
+    renderEvent(await evCall({hist:1}));
+    $("evProg").textContent="saved";
+  }catch(e){
+    // moving the start of a running event is refused; the rest still applied
+    if(/already started/.test(e.message)){
+      try{ await evCall({edit:1, to:q.to, name:q.name}); renderEvent(await evCall({hist:1}));
+           $("evProg").textContent="saved (the start can't move now)" }
+      catch(e2){ $("evProg").textContent=e2.message }
+    } else $("evProg").textContent=e.message;
+  }
+  finally{ $("evEdit").disabled=false; setTimeout(()=>$("evProg").textContent="",6000) }
+};
 $("evSave").onclick=async()=>{
   const f=$("evFrom").value, t=$("evTo").value;
   if(!f||!t){ $("evProg").textContent="pick both times"; return }
   const from=Math.floor(new Date(f+"Z").getTime()/1000), to=Math.floor(new Date(t+"Z").getTime()/1000);
   if(to<=from){ $("evProg").textContent="the end must be after the start"; return }
-  if(!confirm("Open this event? It clears the current leaderboard.")) return;
+  if(!confirm("Open a NEW event? This clears the current leaderboard.\n\nTo change the one that is running, use Save changes instead.")) return;
   $("evSave").disabled=true; $("evProg").textContent="saving…";
   try{
     await evCall({set:1, from, to, name:$("evName").value.trim()});

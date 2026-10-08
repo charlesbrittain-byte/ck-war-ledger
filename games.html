@@ -100,15 +100,17 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <p class="hint" style="margin-top:0">No account, no sign-up. Make a key, paste it in, and you are on the board.</p>
   <div class="row" style="margin-top:11px">
     <a class="btn primary" href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats" target="_blank" rel="noopener">1 &nbsp;Make my key &rsaquo;</a>
-    <span class="meta">opens Torn with the right boxes already ticked</span>
+    <span class="meta">a read-only key, four things, nothing else</span>
   </div>
   <div class="row" style="margin-top:11px">
     <span class="step">2</span>
     <input id="key" type="password" placeholder="Paste your Torn API key" autocomplete="off" spellcheck="false" style="flex:1; min-width:180px; font-family:ui-monospace,monospace">
     <button class="primary" id="connect">Connect</button>
   </div>
-  <p class="hint">It is a key you make yourself, stored only in this browser and only ever sent to api.torn.com.
-    Nobody can read your battle stats but you — that is why you record your own.</p>
+  <p class="hint">The button makes a <b>limited, read-only</b> key that can see four things and nothing else: your
+    name, your bars, your personal stats and your battle stats. It cannot see your mail, your logs, your money or
+    anything you do. You make it yourself, it is stored only in this browser, and it is only ever sent to api.torn.com
+    — nobody here can read your battle stats but you, which is why you record your own.</p>
 </section>
 
 <section id="main" class="card" hidden>
@@ -136,7 +138,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <div class="legend" id="legend"></div>
   <div class="tblwrap">
     <table>
-      <thead><tr><th class="rank">#</th><th>Member</th><th>Adjusted</th><th>Raw</th><th>Xan</th><th>Refills</th><th>Cans</th><th>Gym E</th><th>FHC</th><th>Started</th></tr></thead>
+      <thead><tr><th class="rank">#</th><th>Member</th><th>Adjusted</th><th>Raw</th><th>Xan</th><th>Refills</th><th>Cans</th><th>Started</th></tr></thead>
       <tbody id="board"></tbody>
     </table>
   </div>
@@ -151,9 +153,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     favoured, just not by the length of the street.
     <br><br><b>Xan</b> is what you have taken <b>from the faction armoury</b>, counted from the moment the event
     opened — xanax you bought yourself won't show. <b>Refills</b> and <b>Cans</b> come from your own stats.
-    All three are for interest only and do not affect the score. <b>Gym E</b> and <b>FHC</b> are not being collected: the only
-    key that can read a Torn log is a <b>Full Access</b> one, which shares your whole account, and we are not asking
-    anyone for that. The columns stay as &ldquo;—&rdquo; unless that changes.</p>
+    All three are for interest only and do not affect the score.</p>
   <p class="hint" id="smallprint">There is nothing to press. Connect your key once — before the event if you like —
     and the tracker takes your starting point the moment it opens, reads you every few minutes through it, and takes a
     final reading at the end. Join late and only the rest of the event counts for you, which the board shows beside
@@ -188,7 +188,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 16:11";
+const BUILD = "2026-10-08 16:16";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -395,9 +395,8 @@ function render(data){
       + `<td class="meta">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
       + `<td class="meta">${num(r.xan)}</td><td class="meta">${num(r.refills)}</td>`
       + `<td class="meta">${num(r.cans)}</td>`
-      + `<td class="meta">${num(r.gymE)}</td><td class="meta">${num(r.fhc)}</td>`
       + `<td class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late" : "from the start"}</td></tr>`;
-  }).join("") : `<tr><td colspan="10" class="meta">Nobody has recorded yet — be first.</td></tr>`;
+  }).join("") : `<tr><td colspan="8" class="meta">Nobody has recorded yet — be first.</td></tr>`;
   $("estNote").hidden = !rows.some(r=>r.exact===false);
   if(typeof data.enrolled === "boolean"){
     enrolled = data.enrolled;
