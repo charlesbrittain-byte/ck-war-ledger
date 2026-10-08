@@ -134,10 +134,11 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     per-stat recording only began part way through, so your four stats as they are now have been wound back to the
     total you started on. It is exact for anyone under the cap, and close for everyone else. Events from here on
     record the real split from the first second.</p>
-  <p class="hint">Ranking is on <b>Adjusted %</b>. Gym gains scale with the stat up to 50M and are heavily dampened
-    above it, so plain % gain punishes big players for being big. Adjusted caps each of your four stats at 50M before
-    working out the percentage, which means a small player and a huge player are compared on the training they actually
-    did. Under 50M on all four stats, Adjusted and Raw are the same number.
+  <p class="hint">Ranking is on <b>Adjusted %</b>. Smaller players gain a bigger <i>percentage</i> for the same work,
+    and above 50M per stat Torn heavily dampens gains, so raw % gain is a poor measure at both ends. Adjusted does two
+    things: it caps each of your four stats at 50M, and it tilts the whole scale so that being big is less of a
+    penalty. It is a fixed calculation — your score does not depend on who else entered. Smaller players are still
+    favoured, just not by the length of the street.
     <br><br><b>Xan, Refills, Cans and Boosters</b> are what you have got through since the event opened — for interest
     only, they do not affect the score. <b>Gym E</b> and <b>FHC</b> need a key that shares your Torn log; they show
     &ldquo;—&rdquo; for everyone else. <a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats,log" target="_blank" rel="noopener">Make a key that includes the log &rsaquo;</a></p>
@@ -146,7 +147,9 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     Only your percentage is shared: your actual stats never leave your browser, and nobody here can see them.
     <b>Tap once when the event opens</b> to set your starting point, and again at the end. Torn keeps no history of
     battle stats, so a gain can only be counted from the moment you first tap — tap late and only the rest of the
-    event counts for you, which the board shows beside your name.</p>
+    event counts for you, which the board shows beside your name.
+    <br><br>For <b>this</b> event the four effort counters started part way through, when they were added, so they
+    show what you have got through since then rather than since the event opened. Future events count from the start.</p>
 </section>
 
 <section id="alltime" class="card" hidden>
@@ -175,7 +178,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 14:35";
+const BUILD = "2026-10-08 14:46";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;

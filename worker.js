@@ -322,11 +322,14 @@ async function archiveEvent(env, doc){
    Gym gains scale with the stat up to CAP and are heavily dampened above it, so
    ranking on plain % gain punishes big players for being big. The denominator
    is therefore the sum of the four stats AS THEY WERE AT THE BASELINE, each
-   capped. P dials how hard the dampening bites; REF keeps the result on the
-   same scale whatever P is, so P=1 is exactly the capped percentage and a lower
-   P flattens the field without turning the number into something unreadable. */
+   capped. That handles the dampening above CAP, but below it a smaller player
+   still gains a larger PERCENTAGE for the same work, so P tilts the whole scale:
+   the score is divided by denom^P instead of denom. P=1 is plain capped
+   percentage (small players keep their full advantage), lower P hands more back
+   to bigger players. REF anchors the scale, so a player capped on all four
+   stats scores the same at every P and everyone else rotates around them. */
 const CAP = 50000000;          // per stat
-const PEXP = 1;                // 1 = plain capped percentage; try 0.5 to flatten
+const PEXP = 0.8;              // 1 = plain capped percentage; lower favours bigger players
 const REF = 4 * CAP;           // the scale anchor: a player capped on all four
 
 function denomOf(u){
@@ -365,7 +368,12 @@ function applyReading(u, t, r, maxE){
   // the adjusted score BELOW the raw one. fs is written at birth, and nowhere else.
   if (r.stats) u.ls = r.stats;
   if (r.cons) {
-    if (u.firstX == null) { u.firstX = r.cons.xan; u.firstR = r.cons.ref; u.firstD = r.cons.drk; u.firstB = r.cons.bst }
+    // each counter gets its own guard. Sharing one meant that adding a counter
+    // later left its baseline unset, and its "delta" was the lifetime total.
+    if (u.firstX == null) u.firstX = r.cons.xan;
+    if (u.firstR == null) u.firstR = r.cons.ref;
+    if (u.firstD == null) u.firstD = r.cons.drk;
+    if (u.firstB == null) u.firstB = r.cons.bst;
     u.xan = r.cons.xan; u.ref = r.cons.ref; u.drk = r.cons.drk; u.bst = r.cons.bst;
     u.fullAt = t;
   }
