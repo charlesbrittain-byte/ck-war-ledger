@@ -58,6 +58,40 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
   border-radius:999px; padding:3px 10px; color:var(--dim)}
 .legend i{width:9px; height:9px; border-radius:50%; display:inline-block}
 .legend span.me{color:var(--text); border-color:var(--amber)}
+/* Torn dresses every panel with a titled header bar and leans on gradients and
+   hard dividers rather than whitespace. The card keeps its padding; the header
+   is pulled out to the edges so it reads as a bar across the top. */
+.card > h2{margin:-13px -15px 12px; padding:9px 15px 8px; border-radius:8px 8px 0 0;
+  background:linear-gradient(180deg,#2B313A 0%,#232830 100%); border-bottom:1px solid #11141880;
+  box-shadow:0 1px 0 rgba(255,255,255,.04) inset}
+.pill{display:inline-block; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  padding:2px 8px; border-radius:3px; background:#3A2F14; color:var(--amber); border:1px solid #5A4A1E; margin-left:auto}
+.pill.live{background:#17331C; color:var(--up); border-color:#2C5A33}
+.tiles{display:flex; gap:9px; flex-wrap:wrap; margin:11px 0 2px}
+.tile{flex:1 1 120px; background:linear-gradient(180deg,#20252B,#191D22); border:1px solid var(--line);
+  border-radius:6px; padding:8px 11px}
+.tile b{display:block; font-size:21px; line-height:1.15; color:var(--text)}
+.tile span{display:block; font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; margin-top:2px}
+/* the top three as a podium, the way a war page shows a result */
+.podium{display:flex; gap:9px; align-items:flex-end; margin:12px 0 4px}
+.pod{flex:1; text-align:center; border:1px solid var(--line); border-radius:7px; padding:9px 7px 10px;
+  background:linear-gradient(180deg,#242931,#1B1F25)}
+.pod.p1{order:2; padding-top:17px; border-color:#6B5520; background:linear-gradient(180deg,#2E2814,#1E1F22)}
+.pod.p2{order:1; margin-top:16px}
+.pod.p3{order:3; margin-top:24px}
+.pod.me{box-shadow:0 0 0 1px var(--amber) inset}
+.pmedal{font-size:20px; line-height:1}
+.pod.p1 .pmedal{font-size:26px}
+.pod.p1 .pval{font-size:22px}
+.pname{font-weight:700; font-size:15px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.pval{font-size:19px; font-weight:700; color:var(--up); margin-top:2px}
+.praw{font-size:12px; color:var(--faint)}
+/* a share-of-the-leader bar behind each score, like Torn's war bars */
+td.gain{position:relative}
+.barfill{position:absolute; left:0; top:5px; bottom:5px; border-radius:3px; z-index:0;
+  background:linear-gradient(90deg,rgba(217,160,54,.30),rgba(217,160,54,.06))}
+.barval{position:relative; z-index:1}
+tr.me .barfill{background:linear-gradient(90deg,rgba(217,160,54,.50),rgba(217,160,54,.12))}
 .evtab{background:#181C21; border:1px solid var(--line); border-radius:999px; padding:5px 13px; color:var(--dim); font-size:14px}
 .evtab.on{background:var(--panel2); border-color:var(--amber); color:var(--text); font-weight:600}
 .foot{margin-top:22px; color:var(--faint); font-size:13px}
@@ -120,11 +154,13 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <div class="row" id="evTabs" hidden style="margin:-2px 0 10px"></div>
   <h2>Leaderboard <span id="eventName" class="meta" style="text-transform:none; letter-spacing:0; font-weight:400"></span></h2>
   <div class="note" id="window"></div>
-  <div class="row" style="margin-top:10px">
+  <div class="row" style="margin-top:9px">
     <span class="meta" id="updated"></span>
     <button id="refresh" class="linkish">Refresh now</button>
     <span class="meta" id="status"></span>
   </div>
+  <div class="tiles" id="tiles"></div>
+  <div class="podium" id="podium" hidden></div>
   <div id="error" class="err" hidden></div>
   <div class="note" id="autoBox">
     <b>The clubhouse records for you</b><span id="autoWhy"> — connecting your key is all it takes. The tracker reads
@@ -192,7 +228,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 16:37";
+const BUILD = "2026-10-08 16:49";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -393,19 +429,41 @@ function render(data){
     + (e.open? "" : ` <span class="meta">· ${now<e.from?"soon":"done"}</span>`) + `</button>`).join("");
   for(const b of $("evTabs").querySelectorAll("[data-ev]")) b.onclick=()=>{ curEv=b.dataset.ev; render(lastData||data) };
   const rows = ev.board || [];
-  $("eventName").textContent = ev.name ? "· " + ev.name : "";
+  $("eventName").innerHTML = (ev.name? "· " + esc(ev.name) : "")
+    + (!ev.from? "" : now>=ev.from&&now<=ev.to? ` <span class="pill live">live</span>`
+       : now<ev.from? ` <span class="pill">upcoming</span>` : ` <span class="pill">finished</span>`);
   const w=$("window");
   if(!ev.from || !ev.to){ w.textContent = "No event set yet — leadership will open one."; }
   else if(now < ev.from){ w.innerHTML = `Opens <b>${fmtWhen(ev.from)}</b> — in ${fmtLeft(ev.from-now)}. Nothing to do; your starting point is taken for you.`; }
   else if(now > ev.to){ w.innerHTML = `Finished <b>${fmtWhen(ev.to)}</b>. Final board below.`; }
   else { w.innerHTML = `Running until <b>${fmtWhen(ev.to)}</b> — ${fmtLeft(ev.to-now)} left.`; }
   $("updated").textContent = "updated " + fmtClock(now||Math.floor(Date.now()/1000));
+
+  const scored = rows.filter(r=>r.adj>0);
+  const lead = Math.max(0.0001, ...rows.map(r=>r.adj||0));
+  const avg = scored.length? scored.reduce((a,r)=>a+r.adj,0)/scored.length : 0;
+  $("tiles").innerHTML = !ev.from ? "" :
+      `<div class="tile"><b>${rows.length}</b><span>taking part</span></div>`
+    + `<div class="tile"><b class="pos">${scored.length? "+"+lead.toFixed(2)+"%" : "—"}</b><span>best so far</span></div>`
+    + `<div class="tile"><b>${avg? "+"+avg.toFixed(2)+"%" : "—"}</b><span>average of those moving</span></div>`
+    + `<div class="tile"><b>${now>=ev.from&&now<=ev.to? fmtLeft(ev.to-now) : now<ev.from? fmtLeft(ev.from-now) : "over"}</b><span>${now<ev.from?"until it opens":"left to run"}</span></div>`;
+
+  const top3 = scored.slice(0,3);
+  $("podium").hidden = top3.length<2;
+  $("podium").innerHTML = top3.length<2 ? "" : top3.map((r,i)=>
+      `<div class="pod p${i+1} ${me&&r.id===me.id?"me":""}">`
+    + `<div class="pmedal">${medals[i]}</div>`
+    + `<div class="pname">${esc(r.name||("["+r.id+"]"))}</div>`
+    + `<div class="pval">+${r.adj.toFixed(2)}%</div>`
+    + `<div class="praw">raw +${r.gain.toFixed(2)}%</div></div>`).join("");
   $("board").innerHTML = rows.length ? rows.map((r,i)=>{
     const mine = me && r.id === me.id;
     return `<tr class="${mine?"me":""}">`
       + `<td class="rank">${i<3? `<span class="medal">${medals[i]}</span>` : (i+1)}</td>`
       + `<td>${esc(r.name||("["+r.id+"]"))}${mine? ' <span class="meta">you</span>':""}</td>`
-      + `<td class="gain ${r.adj>0?"pos":"zero"}">${r.adj>0? "+"+r.adj.toFixed(2)+"%" : "—"}</td>`
+      + `<td class="gain ${r.adj>0?"pos":"zero"}">`
+      + (r.adj>0? `<span class="barfill" style="width:${(100*r.adj/lead).toFixed(1)}%"></span>` : "")
+      + `<span class="barval">${r.adj>0? "+"+r.adj.toFixed(2)+"%" : "—"}</span></td>`
       + `<td class="meta">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
       + `<td class="meta">${num(r.xan)}</td><td class="meta">${num(r.refills)}</td>`
       + `<td class="meta">${num(r.cans)}</td>`
