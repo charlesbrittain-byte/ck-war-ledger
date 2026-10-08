@@ -51,9 +51,13 @@ export default {
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const from = +url.searchParams.get("from") || now;
         const to = +url.searchParams.get("to") || (from + 2 * 86400);
+        // opening a different event banks the outgoing one first; reopening the
+        // same window is a do-over and must not bank a half-finished board
+        let banked = false;
+        if (!doc.event || doc.event.from !== from) banked = await archiveEvent(env, doc);
         doc = { users: {}, event: { from, to, name: (url.searchParams.get("name") || "").slice(0, 40) } };
         await env.LEDGER.put(key, JSON.stringify(doc));
-        return json({ ok: true, event: doc.event }, 200, cors);
+        return json({ ok: true, event: doc.event, banked }, 200, cors);
       }
 
       // Opting in: a member hands over their own key so the worker can take the
@@ -72,6 +76,15 @@ export default {
         }
         await env.LEDGER.put("trainkeys", JSON.stringify(keys));
         return json({ ok: true, enrolled: !!keys[id] }, 200, cors);
+      }
+      if (url.searchParams.has("unbank")) {       // leaders: drop one archived event
+        if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
+        const from = +url.searchParams.get("unbank") || 0;
+        const h = (await env.LEDGER.get(HIST_KEY, "json")) || { events: [] };
+        const before = (h.events || []).length;
+        h.events = (h.events || []).filter(e => e.from !== from);
+        await env.LEDGER.put(HIST_KEY, JSON.stringify(h));
+        return json({ ok: true, removed: before - h.events.length }, 200, cors);
       }
       if (url.searchParams.has("drop")) {          // leaders: remove one entry without wiping the board
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
@@ -129,8 +142,15 @@ export default {
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
         enrolledMe = !!keys[id];
       }
+      // asked for only on load and on a manual refresh: the two-minute poll does
+      // not need it, and this saves a KV read on every tick of every open page
+      let history;
+      if (url.searchParams.has("hist")) {
+        const h = (await env.LEDGER.get(HIST_KEY, "json")) || { events: [] };
+        history = h.events || [];
+      }
       return json({ event: ev, open: !!open, now, board, you: id || null, enrolled: enrolledMe,
-                    nextPoll: doc.nextPoll || null, pollEvery: 300 }, 200, cors);
+                    history, nextPoll: doc.nextPoll || null, pollEvery: 300 }, 200, cors);
     }
 
     if (!isAdmin) return json({ error: "bad or missing token" }, 403, cors);
@@ -247,6 +267,37 @@ async function tickFriends(env, t, atWar) {
 // that can see their battle stats.
 // Keep a thinned history per member so the clubhouse can draw a line each.
 // Totals are stored but never served — the series goes out as percentages.
+// Finished events, newest first. Only where everyone landed — no series, so a
+// couple of dozen events stay small enough to send with every board read.
+const HIST_KEY = "trainhist", HIST_MAX = 24, HIST_ROWS = 60;
+
+function finalBoard(doc){
+  return Object.entries(doc.users || {}).map(([uid, u]) => {
+    const xan = Math.max(0, (u.xan || 0) - (u.firstX || 0));
+    const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
+    return { id: +uid, name: u.name || "",
+      gain: u.first > 0 ? +(100 * (u.last - u.first) / u.first).toFixed(3) : 0,
+      energy: xan * 250 + ref * (u.maxE || 0) };
+  }).sort((a, b) => b.gain - a.gain).slice(0, HIST_ROWS);
+}
+
+// Banked before a board is cleared, and again by the cron once an event closes,
+// so the all-time table does not depend on anyone remembering to do it. Keyed
+// on the event's start, so archiving the same event twice updates it instead of
+// adding a duplicate.
+async function archiveEvent(env, doc){
+  const ev = doc && doc.event;
+  if (!ev || !ev.from) return false;
+  const board = finalBoard(doc);
+  if (!board.length) return false;
+  const h = (await env.LEDGER.get(HIST_KEY, "json")) || { events: [] };
+  h.events = (h.events || []).filter(e => e.from !== ev.from);
+  h.events.unshift({ from: ev.from, to: ev.to, name: ev.name || "", board });
+  h.events = h.events.slice(0, HIST_MAX);
+  await env.LEDGER.put(HIST_KEY, JSON.stringify(h));
+  return true;
+}
+
 // One call per member does it all: cat=all carries battle stats AND the
 // consumables, so the energy figure costs no extra API reads.
 function readTrainStats(j){
@@ -305,7 +356,14 @@ async function tickTraining(env, t, atWar) {
   const doc = await env.LEDGER.get("train", "json");
   if (!doc || !doc.event || !doc.event.from) return;
   const ev = doc.event;
-  if (t < ev.from || t > ev.to) return;
+  if (t > ev.to) {                  // closed: bank the standings once, then stop
+    if (!doc.archived && await archiveEvent(env, doc)) {
+      doc.archived = true;
+      await env.LEDGER.put("train", JSON.stringify(doc));
+    }
+    return;
+  }
+  if (t < ev.from) return;
   if (doc.nextPoll && t < doc.nextPoll) return;
   // 5 minutes normally; back off to 15 while a war is recording, so the two
   // together stay inside the free tier's 1,000 KV writes a day

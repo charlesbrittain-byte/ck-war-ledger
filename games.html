@@ -59,6 +59,17 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .legend i{width:9px; height:9px; border-radius:50%; display:inline-block}
 .legend span.me{color:var(--text); border-color:var(--amber)}
 .foot{margin-top:22px; color:var(--faint); font-size:13px}
+summary{cursor:pointer; list-style:none; display:flex; align-items:center; gap:9px; padding:2px 0}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"▾"; color:var(--faint); font-size:13px; margin-left:auto; transition:transform .15s}
+details[open]>summary::after{transform:rotate(180deg)}
+summary.head{font-size:15px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--text)}
+summary.head::before{content:""; width:3px; height:15px; background:var(--amber); border-radius:2px; flex:none}
+.ev{border-top:1px solid var(--line); padding:3px 0}
+.ev:first-child{border-top:0}
+.ev>summary{font-weight:600; padding:9px 0}
+.ev>summary>span{font-weight:400}
+.medals{letter-spacing:1px}
 .linkish{background:none; border:0; padding:4px 0 0; color:var(--dim); font-size:13px; text-decoration:underline; cursor:pointer; width:auto}
 .note{background:#181C21; border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin-top:10px; color:var(--dim); font-size:14px}
 .err{background:#3A2225; border:1px solid var(--down); color:#E8B9BC; border-radius:8px; padding:9px 11px; margin-top:10px; font-size:14px}
@@ -128,16 +139,36 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
     counted, so treat it as effort spent, not a total.</p>
 </section>
 
+<section id="alltime" class="card" hidden>
+  <h2>All-time leaderboard <span class="meta" id="allMeta" style="text-transform:none; letter-spacing:0; font-weight:400"></span></h2>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th class="rank">#</th><th>Member</th><th>Events</th><th>Medals</th><th>Total gain</th><th>Best</th></tr></thead>
+      <tbody id="allBoard"></tbody>
+    </table>
+  </div>
+  <p class="hint">Finished events only — the one running now joins in when it closes. Ordered by golds first, then
+    silvers, then bronzes, then total gain, so <b>winning an event counts for more than turning up</b>. An event only
+    counts for you if you actually gained something in it.</p>
+</section>
+
+<section id="pastWrap" class="card" hidden>
+  <details>
+    <summary class="head">Past events <span class="meta" id="pastCount" style="letter-spacing:0; text-transform:none; font-weight:400"></span></summary>
+    <div id="past" style="margin-top:6px"></div>
+  </details>
+</section>
+
 <p class="foot wrap"><span id="build" style="color:var(--faint)"></span> · Times are TCT. Your API key stays in this browser.</p>
 </div>
 
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 07:44";
+const BUILD = "2026-10-08 08:53";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe" };
-let me = null, lastData = null;
+let me = null, lastData = null, lastHist = null;
 
 $("build").textContent = "build " + BUILD;
 
@@ -219,6 +250,7 @@ async function board(extra={}){
   return j;
 }
 
+const medals = ["🥇","🥈","🥉"];
 const LINE_COLOURS=["#D9A036","#7FB069","#5E8CA8","#B06FE0","#E86FA8","#57B26A","#4C9BE0","#E0A45B","#8FD0C0","#D0555B"];
 function drawChart(data){
   const svg=$("chart"), W=1000, H=190, padL=34, padR=12, padT=14, padB=22;
@@ -264,6 +296,61 @@ function energyWhy(r){
   if(!r.refills && !r.maxE && r.xan) bits.push("refills can't be priced until they opt in");
   return bits.length? "Energy bought during the event: "+bits.join(", ") : "No xanax or refills used since their first reading";
 }
+/* ---------- all-time, built from the archived events ----------
+   Medals before totals: a season table where winning matters, not a tally of
+   who showed up most. An event with no gain recorded doesn't count for you. */
+function allTime(hist){
+  const per={};
+  for(const ev of hist){
+    const board=(ev.board||[]).filter(r=>r.gain>0);
+    board.forEach((r,i)=>{
+      const p = per[r.id] || (per[r.id]={id:r.id, name:r.name, n:0, g:0, s:0, b:0, total:0, best:0, bestEv:""});
+      if(r.name) p.name=r.name;
+      p.n++; p.total+=r.gain;
+      if(r.gain>p.best){ p.best=r.gain; p.bestEv=ev.name||fmtWhen(ev.from) }
+      if(i===0)p.g++; else if(i===1)p.s++; else if(i===2)p.b++;
+    });
+  }
+  return Object.values(per).sort((a,b)=> b.g-a.g || b.s-a.s || b.b-a.b || b.total-a.total);
+}
+function renderHist(hist){
+  lastHist = hist;
+  const rows = allTime(hist);
+  $("alltime").hidden = !rows.length;
+  $("allMeta").textContent = hist.length? "· "+hist.length+" event"+(hist.length>1?"s":"") : "";
+  $("allBoard").innerHTML = rows.map((p,i)=>{
+    const mine = me && p.id===me.id;
+    const med = "🥇".repeat(p.g)+"🥈".repeat(p.s)+"🥉".repeat(p.b);
+    return `<tr class="${mine?"me":""}">`
+      + `<td class="rank">${i<3? `<span class="medal">${medals[i]}</span>` : (i+1)}</td>`
+      + `<td>${esc(p.name||("["+p.id+"]"))}${mine? ' <span class="meta">you</span>':""}</td>`
+      + `<td class="meta">${p.n}</td>`
+      + `<td class="medals">${med||"<span class=\"meta\">—</span>"}</td>`
+      + `<td class="gain pos">+${p.total.toFixed(2)}%</td>`
+      + `<td class="meta" title="${esc(p.bestEv)}">+${p.best.toFixed(2)}%</td></tr>`;
+  }).join("");
+
+  $("pastWrap").hidden = !hist.length;
+  $("pastCount").textContent = hist.length? "("+hist.length+")" : "";
+  $("past").innerHTML = hist.map(ev=>{
+    const board=(ev.board||[]).filter(r=>r.gain>0);
+    const win=board[0];
+    return `<details class="ev"><summary>${esc(ev.name||"Event")} <span class="meta">`
+      + `${fmtWhen(ev.from)} – ${fmtWhen(ev.to)}`
+      + (win? ` · won by ${esc(win.name||win.id)} +${win.gain.toFixed(2)}%` : " · nobody recorded a gain")
+      + `</span></summary>`
+      + (board.length
+        ? `<div class="tblwrap"><table><thead><tr><th class="rank">#</th><th>Member</th><th>Gain</th></tr></thead><tbody>`
+          + board.map((r,i)=>{ const mine = me && r.id===me.id;
+              return `<tr class="${mine?"me":""}"><td class="rank">${i<3? `<span class="medal">${medals[i]}</span>`:(i+1)}</td>`
+                + `<td>${esc(r.name||("["+r.id+"]"))}${mine? ' <span class="meta">you</span>':""}</td>`
+                + `<td class="gain pos">+${r.gain.toFixed(2)}%</td></tr>` }).join("")
+          + `</tbody></table></div>`
+        : `<p class="meta" style="padding:0 0 8px">Nobody recorded a gain in this one.</p>`)
+      + `</details>`;
+  }).join("");
+}
+
 function render(data){
   const rows = data.board || [];
   const ev = data.event || {};
@@ -275,7 +362,6 @@ function render(data){
   else if(now > ev.to){ w.innerHTML = `Finished <b>${fmtWhen(ev.to)}</b>. Final board below.`; }
   else { w.innerHTML = `Running until <b>${fmtWhen(ev.to)}</b> — ${fmtLeft(ev.to-now)} left.`; }
   $("record").disabled = !data.open;
-  const medals = ["🥇","🥈","🥉"];
   $("board").innerHTML = rows.length ? rows.map((r,i)=>{
     const mine = me && r.id === me.id;
     return `<tr class="${mine?"me":""}">`
@@ -294,6 +380,10 @@ function render(data){
     setSmallprint(data.enrolled);
   }
   drawChart(data);
+  if(Array.isArray(data.history)) renderHist(data.history);
+  else if(lastHist) renderHist(lastHist);
+  // an event closing is when a new archive appears, so go and look
+  if(lastData && lastData.open && !data.open) board({hist:1}).then(render).catch(()=>{});
   lastData = data;
 }
 
@@ -308,7 +398,7 @@ $("connect").onclick = async ()=>{
     save(LS.me, {id:me.id, name:me.name});
     $("who").textContent = me.name;
     $("setup").hidden = true; $("main").hidden = false;
-    render(await board());
+    render(await board({hist:1}));
   }catch(e){ showErr(e.message) }
   finally{ $("connect").disabled = false }
 };
@@ -355,7 +445,7 @@ function setSmallprint(enrolled){
 }
 $("autoMore").onclick = ()=>{ showWhy = !showWhy; setSmallprint($("auto").checked) };
 $("refresh").onclick = async ()=>{
-  try{ render(await board()); showErr("") }catch(e){ showErr(e.message) }
+  try{ render(await board({hist:1})); showErr("") }catch(e){ showErr(e.message) }
 };
 
 setInterval(async ()=>{
@@ -369,7 +459,7 @@ setInterval(async ()=>{
   $("key").value = k;
   if(m){ me = m; $("who").textContent = m.name || "" }
   $("setup").hidden = true; $("main").hidden = false;
-  board().then(render).catch(e=>showErr(e.message));
+  board({hist:1}).then(render).catch(e=>showErr(e.message));
 })();
 </script>
 </body>
