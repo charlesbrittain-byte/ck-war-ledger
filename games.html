@@ -93,8 +93,10 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     <input id="key" type="password" placeholder="Paste your Limited API key" autocomplete="off" spellcheck="false" style="flex:1; min-width:200px; font-family:ui-monospace,monospace">
     <button class="primary" id="connect">Connect</button>
   </div>
-  <p class="hint">A <b>Limited</b> key from torn.com → Settings → API key. It is stored only in this browser and only ever sent to api.torn.com.
-    Nobody can read your battle stats but you — that is why you record your own.</p>
+  <p class="hint"><a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats" target="_blank" rel="noopener"><b>Make a key for this &rsaquo;</b></a> —
+    opens Torn with the right permissions already ticked (your basics, bars, personal stats and battle stats). Or use any
+    <b>Limited</b> key from torn.com &rarr; Settings &rarr; API key. It is stored only in this browser and only ever sent
+    to api.torn.com. Nobody can read your battle stats but you — that is why you record your own.</p>
 </section>
 
 <section id="main" class="card" hidden>
@@ -113,7 +115,9 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     <b>The clubhouse records for you</b><span id="autoWhy"> — connecting your key is all it takes. The tracker reads
       your stats for you: once when an event opens, regularly through it, and once at the end. No tapping, and your
       starting point is caught even if you are asleep. Your key is only ever used to read your own battle stats, and
-      only the percentage is ever shared.</span>
+      only percentages are ever shared — never your actual stats. Worth knowing: the board shows Raw and Adjusted side
+      by side, and comparing the two gives a rough idea of how big someone's stats are. It is a friendly faction
+      competition, so that is the point, but it is your call.</span>
     <div class="meta" id="autoState" style="margin-top:6px"></div>
     <button id="autoMore" class="linkish" hidden>How it works</button>
     <button id="autoStop" class="linkish" style="margin-left:14px" hidden>Stop recording me</button>
@@ -122,10 +126,20 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <div class="legend" id="legend"></div>
   <div class="tblwrap">
     <table>
-      <thead><tr><th class="rank">#</th><th>Member</th><th>Gain</th><th>Started</th></tr></thead>
+      <thead><tr><th class="rank">#</th><th>Member</th><th>Adjusted</th><th>Raw</th><th>Xan</th><th>Refills</th><th>Cans</th><th>Boosters</th><th>Gym E</th><th>FHC</th><th>Started</th></tr></thead>
       <tbody id="board"></tbody>
     </table>
   </div>
+  <p class="hint" id="estNote" hidden><b>Adjusted %</b> for this event is worked out from your starting
+    <i>total</i> rather than your four stats — the per-stat baseline wasn't being recorded when it opened. It only
+    differs for players at the cap on some stats but not others. Events from here on use the exact figure.</p>
+  <p class="hint">Ranking is on <b>Adjusted %</b>. Gym gains scale with the stat up to 50M and are heavily dampened
+    above it, so plain % gain punishes big players for being big. Adjusted caps each of your four stats at 50M before
+    working out the percentage, which means a small player and a huge player are compared on the training they actually
+    did. Under 50M on all four stats, Adjusted and Raw are the same number.
+    <br><br><b>Xan, Refills, Cans and Boosters</b> are what you have got through since the event opened — for interest
+    only, they do not affect the score. <b>Gym E</b> and <b>FHC</b> need a key that shares your Torn log; they show
+    &ldquo;—&rdquo; for everyone else. <a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,personalstats,battlestats,log" target="_blank" rel="noopener">Make a key that includes the log &rsaquo;</a></p>
   <p class="hint" id="smallprint">Opting in above is the easy way: join any time, even before the event, and your starting point is
     taken the moment it opens. Otherwise, highest <b>percentage</b> gain in total battle stats wins — so it is fair whether you are big or small.
     Only your percentage is shared: your actual stats never leave your browser, and nobody here can see them.
@@ -160,7 +174,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 13:46";
+const BUILD = "2026-10-08 14:15";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -223,9 +237,11 @@ async function myStats(){
     if(maxe) save(LS.maxe, maxe);
   }
   return {id, name, total, maxe,
+    str: bs.strength||0, def: bs.defense||0, spd: bs.speed||0, dex: bs.dexterity||0,
     xan: (p.drugs && p.drugs.xanax) || 0,
     ref: (p.other && p.other.refills && p.other.refills.energy) || 0,
-    drk: (p.items && p.items.used && p.items.used.energy_drinks) || 0};
+    drk: (p.items && p.items.used && p.items.used.energy_drinks) || 0,
+    bst: (p.items && p.items.used && p.items.used.boosters) || 0};
 }
 
 async function enrol(on){
@@ -289,15 +305,17 @@ function drawChart(data){
 /* ---------- all-time, built from the archived events ----------
    Medals before totals: a season table where winning matters, not a tally of
    who showed up most. An event with no gain recorded doesn't count for you. */
+// older archives only have the raw figure, so fall back to it
+const sc = r => (r.adj != null ? r.adj : r.gain) || 0;
 function allTime(hist){
   const per={};
   for(const ev of hist){
-    const board=(ev.board||[]).filter(r=>r.gain>0);
+    const board=(ev.board||[]).filter(r=>sc(r)>0);
     board.forEach((r,i)=>{
       const p = per[r.id] || (per[r.id]={id:r.id, name:r.name, n:0, g:0, s:0, b:0, total:0, best:0, bestEv:""});
       if(r.name) p.name=r.name;
-      p.n++; p.total+=r.gain;
-      if(r.gain>p.best){ p.best=r.gain; p.bestEv=ev.name||fmtWhen(ev.from) }
+      p.n++; p.total+=sc(r);
+      if(sc(r)>p.best){ p.best=sc(r); p.bestEv=ev.name||fmtWhen(ev.from) }
       if(i===0)p.g++; else if(i===1)p.s++; else if(i===2)p.b++;
     });
   }
@@ -323,24 +341,25 @@ function renderHist(hist){
   $("pastWrap").hidden = !hist.length;
   $("pastCount").textContent = hist.length? "("+hist.length+")" : "";
   $("past").innerHTML = hist.map(ev=>{
-    const board=(ev.board||[]).filter(r=>r.gain>0);
+    const board=(ev.board||[]).filter(r=>sc(r)>0);
     const win=board[0];
     return `<details class="ev"><summary>${esc(ev.name||"Event")} <span class="meta">`
       + `${fmtWhen(ev.from)} – ${fmtWhen(ev.to)}`
-      + (win? ` · won by ${esc(win.name||win.id)} +${win.gain.toFixed(2)}%` : " · nobody recorded a gain")
+      + (win? ` · won by ${esc(win.name||win.id)} +${sc(win).toFixed(2)}%` : " · nobody recorded a gain")
       + `</span></summary>`
       + (board.length
-        ? `<div class="tblwrap"><table><thead><tr><th class="rank">#</th><th>Member</th><th>Gain</th></tr></thead><tbody>`
+        ? `<div class="tblwrap"><table><thead><tr><th class="rank">#</th><th>Member</th><th>Adjusted</th></tr></thead><tbody>`
           + board.map((r,i)=>{ const mine = me && r.id===me.id;
               return `<tr class="${mine?"me":""}"><td class="rank">${i<3? `<span class="medal">${medals[i]}</span>`:(i+1)}</td>`
                 + `<td>${esc(r.name||("["+r.id+"]"))}${mine? ' <span class="meta">you</span>':""}</td>`
-                + `<td class="gain pos">+${r.gain.toFixed(2)}%</td></tr>` }).join("")
+                + `<td class="gain pos">+${sc(r).toFixed(2)}%</td></tr>` }).join("")
           + `</tbody></table></div>`
         : `<p class="meta" style="padding:0 0 8px">Nobody recorded a gain in this one.</p>`)
       + `</details>`;
   }).join("");
 }
 
+const num = v => (v==null? "—" : v===0? "0" : v.toLocaleString());
 function render(data){
   const rows = data.board || [];
   const ev = data.event || {};
@@ -357,9 +376,14 @@ function render(data){
     return `<tr class="${mine?"me":""}">`
       + `<td class="rank">${i<3? `<span class="medal">${medals[i]}</span>` : (i+1)}</td>`
       + `<td>${esc(r.name||("["+r.id+"]"))}${mine? ' <span class="meta">you</span>':""}</td>`
-      + `<td class="gain ${r.gain>0?"pos":"zero"}">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
+      + `<td class="gain ${r.adj>0?"pos":"zero"}">${r.adj>0? "+"+r.adj.toFixed(2)+"%" : "—"}</td>`
+      + `<td class="meta">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
+      + `<td class="meta">${num(r.xan)}</td><td class="meta">${num(r.refills)}</td>`
+      + `<td class="meta">${num(r.cans)}</td><td class="meta">${num(r.boosters)}</td>`
+      + `<td class="meta">${num(r.gymE)}</td><td class="meta">${num(r.fhc)}</td>`
       + `<td class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late" : "from the start"}</td></tr>`;
-  }).join("") : `<tr><td colspan="4" class="meta">Nobody has recorded yet — be first.</td></tr>`;
+  }).join("") : `<tr><td colspan="11" class="meta">Nobody has recorded yet — be first.</td></tr>`;
+  $("estNote").hidden = !rows.some(r=>r.exact===false);
   $("firstNote").hidden = !(me && rows.some(r=>r.id===me.id && r.gain===0));
   if(typeof data.enrolled === "boolean"){
     enrolled = data.enrolled;
@@ -402,12 +426,13 @@ $("record").onclick = async ()=>{
     me = await myStats();
     $("who").textContent = me.name;
     const data = await board({id:me.id, name:me.name, total:me.total,
-                              xan:me.xan||0, ref:me.ref||0, drk:me.drk||0, maxe:me.maxe||0});
+                              str:me.str||0, def:me.def||0, spd:me.spd||0, dex:me.dex||0,
+                              xan:me.xan||0, ref:me.ref||0, drk:me.drk||0, bst:me.bst||0, maxe:me.maxe||0});
     render(data);
     if(!data.open){ $("status").textContent = ""; showErr(data.event && data.event.from && data.now < data.event.from
         ? "The event hasn't opened yet." : "The event has finished — the board is final."); return }
     const mine = (data.board||[]).find(r=>r.id===me.id);
-    $("status").textContent = mine && mine.gain>0 ? `logged — you're up ${mine.gain.toFixed(2)}%` : "starting point saved";
+    $("status").textContent = mine && mine.adj>0 ? `logged — you're up ${mine.adj.toFixed(2)}%` : "starting point saved";
   }catch(e){ showErr(e.message); $("status").textContent="" }
   finally{ $("record").disabled = false; setTimeout(()=>$("status").textContent="", 6000) }
 };

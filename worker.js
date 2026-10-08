@@ -73,6 +73,12 @@ export default {
           if (!k) return json({ error: "missing key" }, 400, cors);
           keys[id] = { key: k, name: (url.searchParams.get("name") || "").slice(0, 30), at: Math.floor(Date.now() / 1000) };
           keys[id].maxE = +url.searchParams.get("maxe") || await maxEnergy(k);
+          // a custom key may grant log access without being a Full key; record
+          // what this one allows so the gym/FHC columns know who to ask
+          try {
+            const ki = await (await fetch("https://api.torn.com/v2/key/info?key=" + encodeURIComponent(k))).json();
+            keys[id].log = (ki.info && ki.info.log && ki.info.log.available) || [];
+          } catch (e) { keys[id].log = [] }
         }
         await env.LEDGER.put("trainkeys", JSON.stringify(keys));
         return json({ ok: true, enrolled: !!keys[id] }, 200, cors);
@@ -97,7 +103,8 @@ export default {
       if (url.searchParams.has("enrolled")) {          // leaders: who opted in, names only
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
-        return json({ enrolled: Object.entries(keys).map(([id, v]) => ({ id: +id, name: v.name, at: v.at })) }, 200, cors);
+        return json({ enrolled: Object.entries(keys).map(([id, v]) => ({ id: +id, name: v.name, at: v.at,
+                      log: (v.log || []).length ? v.log : null })) }, 200, cors);
       }
 
       const ev = doc.event || {};
@@ -106,8 +113,10 @@ export default {
       const total = +url.searchParams.get("total") || 0;
       if (id && total && open) {
         const name = (url.searchParams.get("name") || "").slice(0, 30);
-        const read = { total, xan: +url.searchParams.get("xan") || 0,
-                       ref: +url.searchParams.get("ref") || 0, drk: +url.searchParams.get("drk") || 0 };
+        const num = n => +url.searchParams.get(n) || 0;
+        const read = { total };
+        if (num("str") && num("def")) read.stats = { s: num("str"), d: num("def"), p: num("spd"), x: num("dex") };
+        if (url.searchParams.has("xan")) read.cons = { xan: num("xan"), ref: num("ref"), drk: num("drk"), bst: num("bst") };
         const maxE = +url.searchParams.get("maxe") || 0;
         let u = doc.users[id];
         // first reading inside the window is the baseline, and it stays the
@@ -125,18 +134,24 @@ export default {
         const xan = Math.max(0, (u.xan || 0) - (u.firstX || 0));
         const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
         const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
-        const ser = u.first > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / u.first).toFixed(3)]) : [];
+        const bst = Math.max(0, (u.bst || 0) - (u.firstB || 0));
+        const g = (u.last || 0) - (u.first || 0);
+        const den = denomOf(u), sc = Math.pow(den, PEXP) * Math.pow(REF, 1 - PEXP);
+        // the chart follows the ranking, so it plots the adjusted score
+        const ser = sc > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / sc).toFixed(3)]) : [];
         // boards recorded by the older build lost their baseline timestamp from
         // the series, but firstAt still has it — put the anchor back
         if (ser.length && u.firstAt && ser[0][0] > u.firstAt) ser.unshift([u.firstAt, 0]);
         return {
         id: +uid, name: u.name,
-        gain: u.first > 0 ? +(100 * (u.last - u.first) / u.first).toFixed(3) : 0,
-        energy: xan * 250 + ref * (u.maxE || 0), xan, refills: ref, drinks: drk, maxE: u.maxE || 0,
+        gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
+        adj: scoreOf(u, g), exact: !!u.fs,
+        xan, refills: ref, cans: drk, boosters: bst,
+        gymE: null, fhc: null,                      // log only — see logOk below
         since: u.firstAt, updated: u.lastAt,
         lateBy: ev.from ? Math.max(0, u.firstAt - ev.from) : 0,
         series: ser
-      }}).sort((a, b) => b.gain - a.gain);
+      }}).sort((a, b) => b.adj - a.adj);
       let enrolledMe = false;
       if (id) {
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
@@ -150,7 +165,9 @@ export default {
         history = h.events || [];
       }
       return json({ event: ev, open: !!open, now, board, you: id || null, enrolled: enrolledMe,
-                    history, nextPoll: doc.nextPoll || null, pollEvery: 300 }, 200, cors);
+                    history, scoring: { cap: CAP, p: PEXP, ref: REF },
+                    locked: !!doc.locked, keyTest: isAdmin ? (doc.keyTest || null) : null,
+                    nextPoll: doc.nextPoll || null, pollEvery: 180 }, 200, cors);
     }
 
     if (!isAdmin) return json({ error: "bad or missing token" }, 403, cors);
@@ -275,10 +292,13 @@ function finalBoard(doc){
   return Object.entries(doc.users || {}).map(([uid, u]) => {
     const xan = Math.max(0, (u.xan || 0) - (u.firstX || 0));
     const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
+    const g = (u.last || 0) - (u.first || 0);
     return { id: +uid, name: u.name || "",
-      gain: u.first > 0 ? +(100 * (u.last - u.first) / u.first).toFixed(3) : 0,
-      energy: xan * 250 + ref * (u.maxE || 0) };
-  }).sort((a, b) => b.gain - a.gain).slice(0, HIST_ROWS);
+      gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw, kept for the detail view
+      adj: scoreOf(u, g), exact: !!u.fs,
+      xan, refills: ref, cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
+      boosters: Math.max(0, (u.bst || 0) - (u.firstB || 0)) };
+  }).sort((a, b) => b.adj - a.adj).slice(0, HIST_ROWS);
 }
 
 // Banked before a board is cleared, and again by the cron once an event closes,
@@ -298,17 +318,39 @@ async function archiveEvent(env, doc){
   return true;
 }
 
-// One call per member does it all: cat=all carries battle stats AND the
-// consumables, so the energy figure costs no extra API reads.
-function readTrainStats(j){
-  const ps = j && j.personalstats; if (!ps) return null;
-  const bs = ps.battle_stats || ps;
-  const total = bs.total ?? ((bs.strength || 0) + (bs.defense || 0) + (bs.speed || 0) + (bs.dexterity || 0));
-  if (!total) return null;
-  return { total,
-    xan: (ps.drugs && ps.drugs.xanax) || 0,
-    ref: (ps.other && ps.other.refills && ps.other.refills.energy) || 0,
-    drk: (ps.items && ps.items.used && ps.items.used.energy_drinks) || 0 };
+/* ---------------- scoring ----------------
+   Gym gains scale with the stat up to CAP and are heavily dampened above it, so
+   ranking on plain % gain punishes big players for being big. The denominator
+   is therefore the sum of the four stats AS THEY WERE AT THE BASELINE, each
+   capped. P dials how hard the dampening bites; REF keeps the result on the
+   same scale whatever P is, so P=1 is exactly the capped percentage and a lower
+   P flattens the field without turning the number into something unreadable. */
+const CAP = 50000000;          // per stat
+const PEXP = 1;                // 1 = plain capped percentage; try 0.5 to flatten
+const REF = 4 * CAP;           // the scale anchor: a player capped on all four
+
+function denomOf(u){
+  if (u.fs) return (Math.min(u.fs.s || 0, CAP) + Math.min(u.fs.d || 0, CAP)
+                  + Math.min(u.fs.p || 0, CAP) + Math.min(u.fs.x || 0, CAP));
+  return Math.min(u.first || 0, REF);     // no per-stat baseline on file: the fallback
+}
+function scoreOf(u, gain){
+  const d = denomOf(u);
+  if (d <= 0) return 0;
+  return +(100 * gain / (Math.pow(d, PEXP) * Math.pow(REF, 1 - PEXP))).toFixed(3);
+}
+
+// One category per call — Torn rejects "cat=drugs,items,other". battle_stats is
+// five fields, cat=all is 217, and we already tripped Torn's daily record limit
+// once, so the stats are read often and the consumables rarely.
+async function psCat(key, cat){
+  try {
+    const r = await fetch("https://api.torn.com/v2/user/personalstats?cat=" + cat
+      + "&key=" + encodeURIComponent(key) + "&comment=CKClubhouse");
+    const j = await r.json();
+    if (j && j.error) return { _error: j.error.error || ("code " + j.error.code) };
+    return j.personalstats || {};
+  } catch (e) { return { _error: "unreachable" } }
 }
 
 // Torn records no gym energy anywhere, so "energy used" can only be the energy
@@ -317,10 +359,38 @@ function readTrainStats(j){
 // everything after it is a delta. Natural regen is not counted — it cannot be.
 function applyReading(u, t, r, maxE){
   if (maxE) u.maxE = maxE;
-  if (u.firstX == null) { u.firstX = r.xan; u.firstR = r.ref; u.firstD = r.drk }
-  u.xan = r.xan; u.ref = r.ref; u.drk = r.drk;
+  // the baseline split is only ever written once, when the record is born —
+  // overwriting it later would quietly make "the start" mean today
+  if (r.stats && !u.fs) u.fs = r.stats;
+  if (r.stats) u.ls = r.stats;
+  if (r.cons) {
+    if (u.firstX == null) { u.firstX = r.cons.xan; u.firstR = r.cons.ref; u.firstD = r.cons.drk; u.firstB = r.cons.bst }
+    u.xan = r.cons.xan; u.ref = r.cons.ref; u.drk = r.cons.drk; u.bst = r.cons.bst;
+    u.fullAt = t;
+  }
   u.last = r.total; u.lastAt = t;
   return pushSample(u, t, r.total);
+}
+
+// Read a member: battle stats always, the four consumable counters only when
+// asked for. Returns null if their key is no good.
+async function readMember(key, withCons){
+  const b = await psCat(key, "battle_stats");
+  if (b._error) return { _error: b._error };
+  const bs = b.battle_stats || b;
+  const stats = { s: bs.strength || 0, d: bs.defense || 0, p: bs.speed || 0, x: bs.dexterity || 0 };
+  const total = bs.total ?? (stats.s + stats.d + stats.p + stats.x);
+  if (!total) return { _error: "no battle stats" };
+  const out = { total, stats };
+  if (withCons) {
+    const [dg, it, ot] = await Promise.all([psCat(key, "drugs"), psCat(key, "items"), psCat(key, "other")]);
+    if (!dg._error && !it._error && !ot._error) out.cons = {
+      xan: (dg.drugs && dg.drugs.xanax) || 0,
+      ref: (ot.other && ot.other.refills && ot.other.refills.energy) || 0,
+      drk: (it.items && it.items.used && it.items.used.energy_drinks) || 0,
+      bst: (it.items && it.items.used && it.items.used.boosters) || 0 };
+  }
+  return out;
 }
 
 // A refill is a full energy bar, so their maximum is needed to price it — the
@@ -356,42 +426,71 @@ async function tickTraining(env, t, atWar) {
   const doc = await env.LEDGER.get("train", "json");
   if (!doc || !doc.event || !doc.event.from) return;
   const ev = doc.event;
-  if (t > ev.to) {                  // closed: bank the standings once, then stop
-    if (!doc.archived && await archiveEvent(env, doc)) {
-      doc.archived = true;
+  const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
+  const ids = Object.keys(keys);
+
+  // ---- before the start: nothing to record, but check the keys work ----
+  if (t < ev.from) {
+    if (ev.from - t <= 300 && !doc.keyTest && ids.length) {
+      const bad = [];
+      for (const id of ids) {
+        const r = await psCat(keys[id].key, "battle_stats");
+        if (r._error) bad.push({ id: +id, name: keys[id].name, why: r._error });
+      }
+      doc.keyTest = { at: t, checked: ids.length, bad };
+      doc.nextPoll = ev.from;                 // the baseline is taken AT the start
       await env.LEDGER.put("train", JSON.stringify(doc));
     }
     return;
   }
-  if (t < ev.from) return;
-  if (doc.nextPoll && t < doc.nextPoll) return;
-  // 5 minutes normally; back off to 15 while a war is recording, so the two
+
+  // ---- after the end: one final reading, then lock ----
+  const over = t > ev.to;
+  if (over && doc.locked) return;
+
+  if (doc.nextPoll && t < doc.nextPoll && !over) return;
+
+  // 3 minutes normally; back off to 15 while a war is recording, so the two
   // together stay inside the free tier's 1,000 KV writes a day
-  const every = atWar ? 900 : 300;
-  const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
-  const ids = Object.keys(keys);
+  const every = atWar ? 900 : 180;
   if (!ids.length) { doc.nextPoll = t + 3600; await env.LEDGER.put("train", JSON.stringify(doc)); return }
-  let changed = false;
+
+  // The free plan allows 50 subrequests per invocation. Battle stats cost one
+  // per member and the consumables three, so the consumables rotate through
+  // whoever is most overdue rather than everyone refreshing at once.
+  let budget = 40 - ids.length;
+  const wantCons = new Set();
+  const overdue = ids.filter(id => doc.users[id])
+    .sort((a, b) => (doc.users[a].fullAt || 0) - (doc.users[b].fullAt || 0));
+  for (const id of ids) if (!doc.users[id] && budget >= 3) { wantCons.add(id); budget -= 3 }  // baselines first
+  if (over) for (const id of overdue) if (budget >= 3) { wantCons.add(id); budget -= 3 }      // and the final reading
+  else for (const id of overdue) {
+    if (budget < 3) break;
+    if (t - (doc.users[id].fullAt || 0) < 900) break;
+    wantCons.add(id); budget -= 3;
+  }
+
   let keysChanged = false;
   for (const id of ids) {
     try {
       // anyone who opted in before refills were priced needs their maximum once
       if (keys[id].maxE == null) { keys[id].maxE = await maxEnergy(keys[id].key); keysChanged = true }
-      const r = await fetch("https://api.torn.com/v2/user/personalstats?cat=all&key="
-        + encodeURIComponent(keys[id].key) + "&comment=CKClubhouse");
-      const j = await r.json();
-      if (j && j.error) continue;                       // a dead key should not stop the rest
-      const read = readTrainStats(j);
-      if (!read) continue;
+      const read = await readMember(keys[id].key, wantCons.has(id));
+      if (read._error) continue;                      // a dead key must not stop the rest
       let u = doc.users[id];
-      if (!u) { u = doc.users[id] = { name: keys[id].name, first: read.total, firstAt: t, s: [] }; changed = true }
-      else { if (u.last !== read.total || u.xan !== read.xan || u.ref !== read.ref) changed = true;
-             if (keys[id].name) u.name = keys[id].name }
+      if (!u) u = doc.users[id] = { name: keys[id].name, first: read.total, firstAt: t, s: [] };
+      else if (keys[id].name) u.name = keys[id].name;
       applyReading(u, t, read, keys[id].maxE);
     } catch (e) { /* skip and try again next time */ }
   }
-  const nearEnd = ev.to - 120;
-  doc.nextPoll = t >= nearEnd ? ev.to + 1 : Math.min(t + every, nearEnd);
+
+  if (over) {                       // the final reading is in: bank it and stop
+    doc.locked = true;
+    if (!doc.archived && await archiveEvent(env, doc)) doc.archived = true;
+  } else {
+    const nearEnd = ev.to - 120;
+    doc.nextPoll = t >= nearEnd ? ev.to + 1 : Math.min(t + every, nearEnd);
+  }
   // a poll where nobody moved still has to remember when it ran, but that is
   // one write instead of one per member
   if (keysChanged) await env.LEDGER.put("trainkeys", JSON.stringify(keys));
