@@ -168,13 +168,13 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   </details>
 </section>
 
-<p class="foot wrap"><span id="build" style="color:var(--faint)"></span> · Times are TCT. Your API key stays in this browser.</p>
+<p class="foot wrap" id="foot"><span id="build" style="color:var(--faint)"></span> · Times are TCT. Your API key stays in this browser.</p>
 </div>
 
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-08 15:26";
+const BUILD = "2026-10-08 15:39";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -452,8 +452,16 @@ async function autoEnrol(){
     setSmallprint(true);
   }catch(e){ /* the board read will show the real state */ }
 }
+let stopArmed = 0;
 $("autoStop").onclick = async ()=>{
   if(!me) return;
+  if(Date.now() > stopArmed){                       // first tap only arms it
+    stopArmed = Date.now() + 6000;
+    $("autoStop").textContent = "Tap again to stop";
+    setTimeout(()=>{ if(Date.now() > stopArmed){ $("autoStop").textContent = "Stop recording me" } }, 6200);
+    return;
+  }
+  stopArmed = 0; $("autoStop").textContent = "Stop recording me";
   $("autoStop").disabled=true; showErr("");
   try{
     await enrol(false);
@@ -464,15 +472,28 @@ $("autoStop").onclick = async ()=>{
   }catch(e){ showErr(e.message) }
   finally{ $("autoStop").disabled=false }
 };
-// Once you have signed up there is nothing left to decide, so the explanation
-// folds away behind a link. Reading it again is one tap.
+// Once you have signed up there is nothing left to decide, so the whole box
+// drops to the bottom of the page and the explanation folds away behind a link.
+// Remember where it started, so stopping puts it back where it was found.
+const autoHome = { parent: $("autoBox").parentNode, before: $("autoBox").nextElementSibling };
+function placeAutoBox(enrolled){
+  const box = $("autoBox");
+  if(enrolled){
+    const foot = $("foot");
+    if(box.nextElementSibling !== foot){ box.style.marginTop = "16px"; foot.parentNode.insertBefore(box, foot) }
+  } else if(box.parentNode !== autoHome.parent){
+    box.style.marginTop = ""; autoHome.parent.insertBefore(box, autoHome.before);
+  }
+}
 let showWhy = false;
 function setSmallprint(enrolled){
+  placeAutoBox(enrolled);
   const fold = enrolled && !showWhy;
   $("autoWhy").hidden = fold;
   $("smallprint").hidden = fold;
   $("autoMore").hidden = !enrolled;
   $("autoStop").hidden = !enrolled;
+  if(!enrolled){ stopArmed = 0; $("autoStop").textContent = "Stop recording me" }
   $("autoMore").textContent = showWhy? "Hide the detail" : "How it works";
 }
 $("autoMore").onclick = ()=>{ showWhy = !showWhy; setSmallprint(enrolled) };
