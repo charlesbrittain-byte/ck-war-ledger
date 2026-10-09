@@ -179,9 +179,9 @@ export default {
           own: Math.max(0, (u.xan || 0) - (u.firstX || 0)),
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
           cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
-          gymE: u.gymE != null ? u.gymE : null,
+          gymE: u.gymE != null ? u.gymE : null, fromLog: !!u.fromLog,
           since: u.firstAt, updated: u.lastAt,
-          lateBy: Math.max(0, u.firstAt - ev.from),
+          lateBy: u.fromLog ? 0 : Math.max(0, u.firstAt - ev.from),
           series: ser
         };
       }).sort((a, b) => b.adj - a.adj);
@@ -520,27 +520,26 @@ async function tickArmoury(env, doc, t, earliest){
   doc.armIds = [...seen].slice(-600);
 }
 
-/* With a key that grants `log`, the gym log gives the thing nothing else does:
-   energy_used per session, alongside trains, happy_used and the gym id. Summed
-   over the event window that is exactly "energy spent training" — no estimating
-   from xanax counts and assumed regen.
+/* A key granting `log` turns the gym log into a complete, exact record: every
+   session carries its timestamp, energy_used, trains, happy_used and the stat
+   before, after and increased. Three things fall out of that which battle-stat
+   sampling can never give us:
 
-   Accumulated rather than re-summed: v1 log returns the 100 most recent entries
-   and pages backwards with `to`, so re-reading a long event every time would
-   cost a pile of calls for an answer that only grows at the end. */
-// Whether a key can read logs. Stored at sign-up, but anyone enrolled before
-// this existed has no flag, so it is filled in on the next poll.
-async function hasLog(key){
-  try {
-    const ki = await (await fetch("https://api.torn.com/v2/key/info?key=" + encodeURIComponent(key))).json();
-    return (((ki.info || ki).selections || {}).user || []).includes("log");
-  } catch (e) { return false }
-}
+   1. Energy actually spent training, rather than inferred from xanax counts.
+   2. A TRUE baseline. `<stat>_before` on the first session after the event
+      opened is that stat's value at the opening, so someone who joined late
+      can still be scored from the start — their stats then are recoverable.
+   3. An exact gain curve, session by session, instead of a 3-minute sample.
 
-async function gymEnergy(key, since, upto){
-  let total = 0, newest = since, cursor = upto, pages = 0;
+   Only for members sharing a log; everyone else keeps the sampled version. */
+const LOG_STATS = { 5300: "strength", 5301: "defense", 5302: "speed", 5303: "dexterity" };
+const STAT_KEY = { strength: "s", defense: "d", speed: "p", dexterity: "x" };
+
+async function gymSessions(key, since, upto){
+  const out = [];
+  let cursor = upto, pages = 0;
   const seen = new Set();
-  while (pages++ < 4) {
+  while (pages++ < 8) {
     let j;
     try {
       const r = await fetch("https://api.torn.com/user/?selections=log&log=5300,5301,5302,5303,5310"
@@ -555,15 +554,40 @@ async function gymEnergy(key, since, upto){
       oldest = Math.min(oldest, e.timestamp);
       if (seen.has(lid)) continue;
       seen.add(lid);
-      if (e.category !== "Gym") continue;                  // in case the type filter is ignored
-      if (e.timestamp <= since || e.timestamp > upto) continue;
-      total += (e.data && e.data.energy_used) || 0;
-      if (e.timestamp > newest) newest = e.timestamp;
+      if (e.category !== "Gym" || e.timestamp < since || e.timestamp > upto) continue;
+      const stat = LOG_STATS[e.log];
+      const d = e.data || {};
+      if (!stat || d[stat + "_before"] == null) continue;
+      out.push({ t: e.timestamp, stat,
+                 before: parseFloat(d[stat + "_before"]),
+                 inc: +d[stat + "_increased"] || 0,
+                 energy: +d.energy_used || 0 });
     }
     if (rows.length < 100 || oldest <= since) break;
     cursor = oldest - 1;
   }
-  return { energy: total, newest };
+  out.sort((a, b) => a.t - b.t);
+  return out;
+}
+
+// Rebuild someone's event from their log: where they started, and every step
+// since. `nowStats` is their latest per-stat reading, used for stats they have
+// not trained in this window — those are unchanged, so now IS the start.
+function fromSessions(sessions, nowStats, from){
+  if (!nowStats) return null;
+  const start = { s: nowStats.s, d: nowStats.d, p: nowStats.p, x: nowStats.x };
+  const earliest = {};
+  for (const g of sessions) if (!(g.stat in earliest)) earliest[g.stat] = g.before;
+  for (const [stat, v] of Object.entries(earliest)) start[STAT_KEY[stat]] = v;
+  const first = start.s + start.d + start.p + start.x;
+  let run = first;
+  const series = [[from, first]];
+  for (const g of sessions) { run += g.inc; series.push([g.t, +run.toFixed(2)]) }
+  // keep it to a sane size for the chart
+  let s2 = series;
+  while (s2.length > 220) s2 = s2.filter((_, i) => i % 2 === 0 || i >= s2.length - 60);
+  return { first, fs: start, series: s2,
+           energy: sessions.reduce((a, g) => a + g.energy, 0) };
 }
 
 // One category per call — Torn rejects "cat=drugs,items,other". battle_stats is
@@ -590,7 +614,16 @@ function applyReading(u, t, r, maxE){
   // adopt today's stats as its baseline, inflating the denominator and dragging
   // the adjusted score BELOW the raw one. fs is written at birth, and nowhere else.
   if (r.stats) u.ls = r.stats;
-  if (r.gymAdd != null) { u.gymE = (u.gymE || 0) + r.gymAdd; u.gymCur = r.gymCur }
+  // the log is authoritative where we have it: the real baseline, the real
+  // curve, the real energy — including for someone who joined after the start
+  if (r.rebuilt) {
+    u.first = r.rebuilt.first;
+    u.fs = r.rebuilt.fs;
+    u.fsEst = false;
+    u.gymE = r.rebuilt.energy;
+    u.fromLog = true;
+    u.s = r.rebuilt.series.slice();
+  }
   if (r.cons) {
     // each counter gets its own guard. Sharing one meant that adding a counter
     // later left its baseline unset, and its "delta" was the lifetime total.
@@ -601,6 +634,11 @@ function applyReading(u, t, r, maxE){
     u.fullAt = t;
   }
   u.last = r.total; u.lastAt = t;
+  if (u.fromLog) {                      // the log stops at the last session; carry it to now
+    const last = u.s[u.s.length - 1];
+    if (!last || last[1] !== r.total) u.s.push([t, r.total]); else last[0] = t;
+    return true;
+  }
   return pushSample(u, t, r.total);
 }
 
@@ -732,9 +770,8 @@ async function tickTraining(env, t, atWar) {
   for (const ev of active) {
     for (const [id, r] of Object.entries(reads)) {
       if (!r.gymKey) continue;
-      const u0 = ev.users[id];
-      const got = await gymEnergy(r.gymKey, (u0 && u0.gymCur) || ev.from, Math.min(ev.to, t));
-      if (got) { r.gymAdd = got.energy; r.gymCur = got.newest }
+      const sess = await gymSessions(r.gymKey, ev.from, Math.min(ev.to, t));
+      if (sess) r.rebuilt = fromSessions(sess, r.stats, ev.from);
     }
     for (const [id, r] of Object.entries(reads)) {
       let u = ev.users[id];
