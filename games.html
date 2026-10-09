@@ -213,7 +213,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <div class="legend" id="legend"></div>
   <div class="tblwrap">
     <table>
-      <thead><tr><th class="rank">#</th><th>Member</th><th>Adjusted</th><th>Raw</th><th>Xanax</th><th>Refills</th><th>Cans</th><th>Gym E</th><th>vs par</th><th>Started</th></tr></thead>
+      <thead><tr><th class="rank">#</th><th>Member</th><th>Share</th><th>Adjusted</th><th>Raw</th><th>Xanax</th><th>Refills</th><th>Cans</th><th>Gym E</th><th>vs par</th><th>Started</th></tr></thead>
       <tbody id="board"></tbody>
     </table>
   </div>
@@ -261,7 +261,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <h2>All-time leaderboard <span class="meta" id="allMeta" style="text-transform:none; letter-spacing:0; font-weight:400"></span></h2>
   <div class="tblwrap">
     <table>
-      <thead><tr><th class="rank">#</th><th>Member</th><th>Events</th><th>Medals</th><th>Total gain</th><th>Best</th></tr></thead>
+      <thead><tr><th class="rank">#</th><th>Member</th><th>Events</th><th>Medals</th><th>Points</th><th>Best share</th></tr></thead>
       <tbody id="allBoard"></tbody>
     </table>
   </div>
@@ -384,25 +384,30 @@ function drawChart(ev, now){
   if(!ev || !ev.from || !rows.length){ svg.innerHTML=""; $("legend").innerHTML=""; return }
   const from=ev.from, to=Math.min(ev.to, Math.max(now||0, ev.from+60));
   const span=Math.max(60, to-from);
-  let max=0; for(const r of rows) for(const [,v] of r.series) if(v>max) max=v;
-  max=Math.max(0.5, max*1.15);
+  /* The series arrive as adjusted score. Divide by the same pool the table uses
+     and every line ends exactly where its share says it should. The divisor is
+     one number applied to all of them, so no curve changes shape. */
+  const pool=poolOf((ev&&ev.board)||[]);
+  const k = pool>0 ? 100/pool : 0;
+  let max=0; for(const r of rows) for(const [,v] of r.series) if(v*k>max) max=v*k;
+  max=Math.max(5, max*1.15);
   const X=t=>padL+(W-padL-padR)*Math.min(1,Math.max(0,(t-from)/span));
   const Y=v=>H-padB-(H-padT-padB)*(v/max);
   let p="";
   // a line per 1% so the scale is readable without axis labels everywhere
-  const step = max>8? 2 : max>3? 1 : 0.5;
+  const step = max>60? 20 : max>30? 10 : max>12? 5 : 2;
   for(let g=0; g<=max; g+=step){
     p+=`<line x1="${padL}" x2="${W-padR}" y1="${Y(g).toFixed(1)}" y2="${Y(g).toFixed(1)}" stroke="#2A2F36" stroke-width="1"/>`;
-    p+=`<text x="${padL-5}" y="${(Y(g)+4).toFixed(1)}" fill="#5A626B" font-size="11" text-anchor="end">${g.toFixed(step<1?1:0)}%</text>`;
+    p+=`<text x="${padL-5}" y="${(Y(g)+4).toFixed(1)}" fill="#5A626B" font-size="11" text-anchor="end">${g}%</text>`;
   }
   rows.forEach((r,i)=>{
     const c=LINE_COLOURS[i%LINE_COLOURS.length];
     const mine = me && r.id===me.id;
-    const pts=r.series.map(([t,v])=>[X(t),Y(v)]);
+    const pts=r.series.map(([t,v])=>[X(t),Y(v*k)]);
     const d=pts.map((pt,j)=>(j?"L":"M")+pt[0].toFixed(1)+" "+pt[1].toFixed(1)).join(" ");
     p+=`<path d="${d}" fill="none" stroke="${c}" stroke-width="${mine?3.2:2}" stroke-linejoin="round" stroke-linecap="round" opacity="${mine?1:.85}"/>`;
     const last=pts[pts.length-1];
-    if(last) p+=`<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="${mine?4:3}" fill="${c}"><title>${esc(r.name)} +${r.gain.toFixed(2)}%</title></circle>`;
+    if(last) p+=`<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="${mine?4:3}" fill="${c}"><title>${esc(r.name)} ${(sc(r)*k).toFixed(1)}% of the room, raw +${r.gain.toFixed(2)}%</title></circle>`;
   });
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
   svg.innerHTML=p;
@@ -416,15 +421,26 @@ function drawChart(ev, now){
    who showed up most. An event with no gain recorded doesn't count for you. */
 // older archives only have the raw figure, so fall back to it
 const sc = r => (r.adj != null ? r.adj : r.gain) || 0;
+/* The headline figure is each member's SHARE of the event: every entrant's
+   adjusted score added up is the 100%, and the board splits it. The ranking is
+   identical either way — it is one divisor applied to everyone — but a share is
+   a number that means something on its own, where "+4.65% adjusted" does not.
+   The trade is that your share moves when somebody else trains, so the adjusted
+   figure stays on the board beside it as the fixed, event-to-event measure. */
+const poolOf = rows => rows.reduce((a,r)=>a+sc(r), 0);
+const shareOf = (r, pool) => pool>0 ? 100*sc(r)/pool : 0;
 function allTime(hist){
   const per={};
   for(const ev of hist){
-    const board=(ev.board||[]).filter(r=>sc(r)>0);
+    const all=(ev.board||[]);
+    const pool=poolOf(all);
+    const board=all.filter(r=>sc(r)>0);
     board.forEach((r,i)=>{
       const p = per[r.id] || (per[r.id]={id:r.id, name:r.name, n:0, g:0, s:0, b:0, total:0, best:0, bestEv:""});
       if(r.name) p.name=r.name;
-      p.n++; p.total+=sc(r);
-      if(sc(r)>p.best){ p.best=sc(r); p.bestEv=ev.name||fmtWhen(ev.from) }
+      const sh=shareOf(r,pool);
+      p.n++; p.total+=sh;
+      if(sh>p.best){ p.best=sh; p.bestEv=ev.name||fmtWhen(ev.from) }
       if(i===0)p.g++; else if(i===1)p.s++; else if(i===2)p.b++;
     });
   }
@@ -443,8 +459,8 @@ function renderHist(hist){
       + `<td>${esc(p.name||("["+p.id+"]"))}${mine? ' <span class="meta">you</span>':""}</td>`
       + `<td class="meta">${p.n}</td>`
       + `<td class="medals">${med||"<span class=\"meta\">—</span>"}</td>`
-      + `<td class="gain pos">+${p.total.toFixed(2)}%</td>`
-      + `<td class="meta" title="${esc(p.bestEv)}">+${p.best.toFixed(2)}%</td></tr>`;
+      + `<td class="gain pos">${p.total.toFixed(1)}</td>`
+      + `<td class="meta" title="${esc(p.bestEv)}">${p.best.toFixed(1)}%</td></tr>`;
   }).join("");
 
   $("pastWrap").hidden = !hist.length;
@@ -454,14 +470,15 @@ function renderHist(hist){
     const win=board[0];
     return `<details class="ev"><summary>${esc(ev.name||"Event")} <span class="meta">`
       + `${fmtWhen(ev.from)} – ${fmtWhen(ev.to)}`
-      + (win? ` · won by ${esc(win.name||win.id)} +${sc(win).toFixed(2)}%` : " · nobody recorded a gain")
+      + (win? ` · won by ${esc(win.name||win.id)} ${shareOf(win, poolOf(ev.board||[])).toFixed(1)}%` : " · nobody recorded a gain")
       + `</span></summary>`
       + (board.length
-        ? `<div class="tblwrap"><table><thead><tr><th class="rank">#</th><th>Member</th><th>Adjusted</th></tr></thead><tbody>`
+        ? `<div class="tblwrap"><table><thead><tr><th class="rank">#</th><th>Member</th><th>Share</th><th>Adjusted</th></tr></thead><tbody>`
           + board.map((r,i)=>{ const mine = me && r.id===me.id;
               return `<tr class="${mine?"me":""}"><td class="rank">${i<3? `<span class="medal">${medals[i]}</span>`:(i+1)}</td>`
                 + `<td>${esc(r.name||("["+r.id+"]"))}${mine? ' <span class="meta">you</span>':""}</td>`
-                + `<td class="gain pos">+${sc(r).toFixed(2)}%</td></tr>` }).join("")
+                + `<td class="gain pos">${shareOf(r, poolOf(ev.board||[])).toFixed(1)}%</td>`
+                + `<td class="meta">+${sc(r).toFixed(2)}%</td></tr>` }).join("")
           + `</tbody></table></div>`
         : `<p class="meta" style="padding:0 0 8px">Nobody recorded a gain in this one.</p>`)
       + `</details>`;
@@ -564,12 +581,13 @@ function render(data){
   $("updated").textContent = "updated " + fmtClock(now||Math.floor(Date.now()/1000));
 
   const scored = rows.filter(r=>r.adj>0);
-  const lead = Math.max(0.0001, ...rows.map(r=>r.adj||0));
-  const avg = scored.length? scored.reduce((a,r)=>a+r.adj,0)/scored.length : 0;
+  const pool = poolOf(rows);
+  const lead = Math.max(0.0001, ...rows.map(r=>shareOf(r,pool)));
+  const avg = scored.length? scored.reduce((a,r)=>a+shareOf(r,pool),0)/scored.length : 0;
   $("tiles").innerHTML = !ev.from ? "" :
       `<div class="tile"><b>${rows.length}</b><span>taking part</span></div>`
-    + `<div class="tile"><b class="pos">${scored.length? "+"+lead.toFixed(2)+"%" : "—"}</b><span>best so far</span></div>`
-    + `<div class="tile"><b>${avg? "+"+avg.toFixed(2)+"%" : "—"}</b><span>average of those moving</span></div>`
+    + `<div class="tile"><b class="pos">${scored.length? lead.toFixed(1)+"%" : "—"}</b><span>biggest share</span></div>`
+    + `<div class="tile"><b>${avg? avg.toFixed(1)+"%" : "—"}</b><span>average of those moving</span></div>`
     + `<div class="tile"><b>${now>=ev.from&&now<=ev.to? fmtLeft(ev.to-now) : now<ev.from? fmtLeft(ev.from-now) : "over"}</b><span>${now<ev.from?"until it opens":"left to run"}</span></div>`;
 
   // the podium is a result, so it waits until there is one — and a leader can
@@ -583,8 +601,8 @@ function render(data){
       `<div class="pod p${i+1} ${me&&r.id===me.id?"me":""}">`
     + `<div class="pmedal">${medals[i]}</div>`
     + `<div class="pname">${esc(r.name||("["+r.id+"]"))}</div>`
-    + `<div class="pval">+${r.adj.toFixed(2)}%</div>`
-    + `<div class="praw">raw +${r.gain.toFixed(2)}%</div></div>`).join("");
+    + `<div class="pval">${shareOf(r,pool).toFixed(1)}%</div>`
+    + `<div class="praw">adjusted +${r.adj.toFixed(2)}%</div></div>`).join("");
   $("board").innerHTML = rows.length ? rows.map((r,i)=>{
     const mine = me && r.id === me.id;
     return `<tr class="${mine?"me":""}">`
@@ -593,8 +611,9 @@ function render(data){
       + (r.jump? `<span class="jump" title="Gained about ${r.jump} times more than the energy they used can normally buy — the signature of a happy jump. It does not affect the score.">&#9889;${r.jump}&times;</span>` : "")
       + `</td>`
       + `<td class="gain ${r.adj>0?"pos":"zero"}">`
-      + (r.adj>0? `<span class="barfill" style="width:${(100*r.adj/lead).toFixed(1)}%"></span>` : "")
-      + `<span class="barval">${r.adj>0? "+"+r.adj.toFixed(2)+"%" : "—"}</span></td>`
+      + (r.adj>0? `<span class="barfill" style="width:${(100*shareOf(r,pool)/lead).toFixed(1)}%"></span>` : "")
+      + `<span class="barval">${r.adj>0? shareOf(r,pool).toFixed(1)+"%" : "—"}</span></td>`
+      + `<td class="meta">${r.adj>0? "+"+r.adj.toFixed(2)+"%" : "—"}</td>`
       + `<td class="meta">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
       + `<td>${pills(r.xan)}</td><td class="meta">${num(r.refills)}</td>`
       + `<td class="meta">${num(r.cans)}</td>`
@@ -602,7 +621,7 @@ function render(data){
       + `<td class="${r.vsPar==null? "meta" : r.vsPar>=1? "pos":"neg"}" title="gain per energy against what ordinary training buys at your size">`
       + `${r.vsPar==null? "&mdash;" : "&times;"+r.vsPar.toFixed(2)}</td>`
       + `<td class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late" : "from the start"}</td></tr>`;
-  }).join("") : `<tr><td colspan="10" class="meta">Nobody has recorded yet — be first.</td></tr>`;
+  }).join("") : `<tr><td colspan="11" class="meta">Nobody has recorded yet — be first.</td></tr>`;
   $("estNote").hidden = !rows.some(r=>r.exact===false);
   if(typeof data.enrolled === "boolean"){
     enrolled = data.enrolled;
@@ -666,8 +685,12 @@ async function recordNow(){
     render(data);
     const open = (data.events||[]).filter(e=>e.open);
     if(!open.length){ $("status").textContent = ""; showErr("Nothing is running at the moment."); return }
-    const mine = (open.find(e=>e.id===curEv) || open[0]).board.find(r=>r.id===me.id);
-    $("status").textContent = mine && mine.adj>0 ? `you're up ${mine.adj.toFixed(2)}%` : "starting point saved";
+    const evb = ((open.find(e=>e.id===curEv) || open[0]).board) || [];
+    const mine = evb.find(r=>r.id===me.id);
+    const pl = poolOf(evb);
+    $("status").textContent = mine && mine.adj>0
+      ? `you have ${shareOf(mine,pl).toFixed(1)}% of the room`
+      : "starting point saved";
   }catch(e){ showErr(e.message); $("status").textContent="" }
   finally{ setTimeout(()=>$("status").textContent="", 6000) }
 }
