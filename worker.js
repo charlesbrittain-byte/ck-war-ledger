@@ -121,7 +121,7 @@ export default {
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
         const only = url.searchParams.get("ev");
-        const done = [];
+        const done = [], added = [];
         for (const ev of doc.events) {
           if (only && ev.id !== only) continue;
           for (const [id, u] of Object.entries(ev.users || {})) {
@@ -144,8 +144,41 @@ export default {
                         baselineWas: was.first, baselineNow: rb.first, xanax: xl });
           }
         }
+
+        /* ?add=1 as well: put somebody on a finished board who was never on it.
+           Only possible for a log sharer, and only by rewinding — their stats
+           today are not their stats at the close, so we read what they are now
+           and subtract everything the log says they have gained since. */
+        if (url.searchParams.has("add")) {
+          for (const ev of doc.events) {
+            if (only && ev.id !== only) continue;
+            for (const [id, k] of Object.entries(keys)) {
+              if (ev.users[id] || !k.log) continue;
+              const inWin = await gymSessions(k.key, ev.from, ev.to);
+              if (!inWin || !inWin.length) { added.push({ ev: ev.id, name: k.name, skipped: "did not train during it" }); continue }
+              const now2 = Math.floor(Date.now() / 1000);
+              const r = await readMember(k.key, false);
+              if (!r || r._error) { added.push({ ev: ev.id, name: k.name, skipped: r ? r._error : "unreadable" }); continue }
+              const since = await gymSessions(k.key, ev.to + 1, now2);
+              if (!since) { added.push({ ev: ev.id, name: k.name, skipped: "could not rewind" }); continue }
+              const end = { s: r.stats.s, d: r.stats.d, p: r.stats.p, x: r.stats.x };
+              for (const g of since) end[STAT_KEY[g.stat]] -= g.inc;      // undo everything since the close
+              const rb = fromSessions(inWin, end, ev.from);
+              if (!rb) { added.push({ ev: ev.id, name: k.name, skipped: "could not rebuild" }); continue }
+              const last = rb.series[rb.series.length - 1][1];
+              ev.users[id] = { name: k.name, first: rb.first, firstAt: ev.from, fs: rb.fs, fsEst: false,
+                               ls: end, last, gymE: rb.energy, fromLog: true, s: rb.series.slice(),
+                               maxE: k.maxE || 150 };
+              const xl = await xanaxFromLog(k.key, ev.from, ev.to);
+              if (xl != null) ev.users[id].xanLog = xl;
+              if (ev.roster) ev.roster[id] = ev.from;
+              added.push({ ev: ev.id, name: k.name, sessions: inWin.length, energy: rb.energy,
+                           rewoundBy: since.length, baseline: rb.first, gained: last - rb.first, xanax: xl });
+            }
+          }
+        }
         await save();
-        return json({ ok: true, rebuilt: done }, 200, cors);
+        return json({ ok: true, rebuilt: done, added }, 200, cors);
       }
 
       // Joining one event. The key is held from the first sign-up, so this is a
