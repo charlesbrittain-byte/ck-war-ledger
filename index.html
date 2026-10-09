@@ -521,6 +521,7 @@ details.settings summary{cursor:pointer}
   <div class="scrubhead">
     <h2 style="margin:0">Clubhouse &middot; who has connected</h2>
     <div class="meta" id="clubMeta"></div>
+    <button id="clubReload" class="mini" style="margin-top:6px">Reload the list</button>
   </div>
   <div class="tblwrap">
     <table id="clubTbl" style="min-width:420px">
@@ -2636,6 +2637,7 @@ function showTab(t){
   bindDashCharts();
   window.scrollTo(0,0);
 }
+$("clubReload").onclick=()=>loadClub();
 $("dashTabs").addEventListener("click",e=>{ const b=e.target.closest("button[data-tab]"); if(b) showTab(b.dataset.tab) });
 
 /* ---------- zoomable strips ----------
@@ -2832,7 +2834,10 @@ const prizeParams=()=>{ const o={prizes:1};
    the event card: it should be there whether or not an event exists, and it was
    not, because it was being drawn from inside renderEvent. */
 async function loadClub(){
-  if(!cfg.syncUrl) return;
+  // Never fail quietly. A blank card told us nothing twice over, and the cause
+  // turned out to be invisible both times.
+  if(!cfg.syncUrl){ $("clubMeta").textContent = "set the worker URL in Polling & data first"; return }
+  $("clubMeta").textContent = "reading…";
   try{
     const e = await evCall({enrolled:1, ev:evPicked||""});
     const list=(e.enrolled||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
