@@ -148,6 +148,7 @@ label.inl{color:var(--dim); font-size:14px; display:flex; align-items:center; ga
 .bigchain .who b{color:var(--text); font-weight:600}
 @media (max-width:760px){ .twocol{grid-template-columns:minmax(0,1fr)} }
 .mini{font-size:13px; padding:3px 10px}
+.pz{font-size:16px}
 .octile{display:flex; flex-direction:column; gap:1px; flex:1 1 130px;
   background:linear-gradient(180deg,#20252B,#191D22); border:1px solid var(--line);
   border-radius:6px; padding:8px 11px}
@@ -470,6 +471,14 @@ details.settings summary{cursor:pointer}
     <div class="meta" id="evMeta"></div>
   </div>
   <div class="row" id="evPick" style="margin-bottom:9px"></div>
+  <div class="zoomrow" style="margin-bottom:7px">
+    <span class="lbl">Prizes</span>
+    <span class="pz">🥇</span><input id="evP1" list="prizeList" placeholder="1st — leave blank for none" style="min-width:170px">
+    <span class="pz">🥈</span><input id="evP2" list="prizeList" placeholder="2nd" style="min-width:130px">
+    <span class="pz">🥉</span><input id="evP3" list="prizeList" placeholder="3rd" style="min-width:130px">
+    <span class="meta" id="evPzNote"></span>
+  </div>
+  <datalist id="prizeList"></datalist>
   <div class="zoomrow">
     <span class="lbl">Name</span>
     <input id="evName" placeholder="Training weekend" style="min-width:150px">
@@ -905,7 +914,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-09 14:29</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-09 16:23</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2781,6 +2790,25 @@ async function evCall(params){
   if(j.error) throw new Error(j.error);
   return j;
 }
+/* A short list of things people actually give away, with Torn's own item ids so
+   the members' page can show the picture. Typing anything else is fine — it is
+   stored as plain text and shown without an image. */
+const PRIZE_ITEMS=[
+  {id:370,n:"Drug Pack"},{id:367,n:"Feathery Hotel Coupon"},{id:283,n:"Donator Pack"},
+  {id:206,n:"Xanax"},{id:197,n:"Ecstasy"},{id:366,n:"Erotic DVD"},{id:369,n:"Lottery Voucher"},
+  {id:732,n:"Blood Bag : A+"},{id:731,n:"Empty Blood Bag"},{id:67,n:"First Aid Kit"},
+  {id:68,n:"Small First Aid Kit"},{id:66,n:"Morphine"},{id:35,n:"Box of Chocolate Bars"},
+  {id:527,n:"Bag of Candy Kisses"},{id:530,n:"Can of Munster"},{id:532,n:"Can of Red Cow"},
+  {id:533,n:"Can of Taurine Elite"},{id:181,n:"Bottle of Champagne"},{id:180,n:"Bottle of Beer"}
+];
+(function fillPrizeList(){
+  const dl=$("prizeList"); if(!dl) return;
+  dl.innerHTML=PRIZE_ITEMS.map(i=>`<option value="${esc(i.n)}">`).join("");
+})();
+const prizeId=name=>{ const f=PRIZE_ITEMS.find(i=>i.n.toLowerCase()===(name||"").trim().toLowerCase()); return f?f.id:0 };
+const prizeParams=()=>{ const o={prizes:1};
+  for(const n of [1,2,3]){ const v=($("evP"+n).value||"").trim(); if(v) o["p"+n]=prizeId(v)+":"+v }
+  return o };
 let evPicked=null, evLast=null;
 function renderEvent(j){
   evLast=j;
@@ -2799,6 +2827,9 @@ function renderEvent(j){
   const state = now<ev.from? "opens "+fmtDT(ev.from) : now>ev.to? "finished "+fmtDT(ev.to) : "running until "+fmtDT(ev.to);
   $("evMeta").textContent=(ev.name? ev.name+" · ":"")+state;
   $("evName").value=ev.name||"";
+  const pz=ev.prizes||{};
+  for(const n of [1,2,3]) $("evP"+n).value = pz[n]? pz[n].name : "";
+  $("evPzNote").textContent = Object.keys(pz).length? "" : "optional — members only see the places you fill in";
   $("evFrom").value=tsToLocalInput(ev.from);
   $("evTo").value=tsToLocalInput(ev.to);
 
@@ -2874,7 +2905,7 @@ $("evClose").onclick=async()=>{
 $("evEdit").onclick=async()=>{
   const f=$("evFrom").value, t=$("evTo").value;
   if(!t){ $("evProg").textContent="pick an end time"; return }
-  const q={edit:1, ev:evPicked, to:Math.floor(new Date(t+"Z").getTime()/1000), name:$("evName").value.trim()};
+  const q={edit:1, ev:evPicked, to:Math.floor(new Date(t+"Z").getTime()/1000), name:$("evName").value.trim(), ...prizeParams()};
   if(f) q.from=Math.floor(new Date(f+"Z").getTime()/1000);   // refused by the worker once it has started
   $("evEdit").disabled=true; $("evProg").textContent="saving…";
   try{
@@ -2884,7 +2915,7 @@ $("evEdit").onclick=async()=>{
   }catch(e){
     // moving the start of a running event is refused; the rest still applied
     if(/already started/.test(e.message)){
-      try{ await evCall({edit:1, ev:evPicked, to:q.to, name:q.name}); renderEvent(await evCall({hist:1}));
+      try{ await evCall({edit:1, ev:evPicked, to:q.to, name:q.name, ...prizeParams()}); renderEvent(await evCall({hist:1}));
            $("evProg").textContent="saved (the start can't move now)" }
       catch(e2){ $("evProg").textContent=e2.message }
     } else $("evProg").textContent=e.message;
@@ -2899,7 +2930,7 @@ $("evSave").onclick=async()=>{
   if(!confirm("Open another event? It runs alongside anything already going, with its own board.")) return;
   $("evSave").disabled=true; $("evProg").textContent="saving…";
   try{
-    const made=await evCall({set:1, from, to, name:$("evName").value.trim()});
+    const made=await evCall({set:1, from, to, name:$("evName").value.trim(), ...prizeParams()});
     evPicked = made && made.event && made.event.id;
     renderEvent(await evCall({hist:1}));
     $("evProg").textContent="open";

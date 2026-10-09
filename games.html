@@ -67,7 +67,17 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .pill{display:inline-block; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
   padding:2px 8px; border-radius:3px; background:#3A2F14; color:var(--amber); border:1px solid #5A4A1E; margin-left:auto}
 .pill.live{background:#17331C; color:var(--up); border-color:#2C5A33}
-.tiles{display:flex; gap:9px; flex-wrap:wrap; margin:11px 0 2px}
+.tiles{display:flex; gap:9px; flex-wrap:wrap; margin:14px 0 2px}
+.headline{font-size:27px; font-weight:700; line-height:1.15; letter-spacing:-.01em; margin:2px 0 3px}
+.when{color:var(--dim); font-size:15px}
+.when b{color:var(--text)}
+.prizes{display:flex; gap:9px; flex-wrap:wrap; margin-top:12px}
+.prize{display:flex; align-items:center; gap:8px; background:linear-gradient(180deg,#20252B,#191D22);
+  border:1px solid var(--line); border-radius:7px; padding:7px 12px 7px 9px}
+.prize.p1{border-color:#6B5520; background:linear-gradient(180deg,#2E2814,#1E1F22)}
+.prize img{width:34px; height:34px; object-fit:contain; flex:none}
+.prize .pl{font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--faint); line-height:1.2}
+.prize .pn{font-weight:700; font-size:15px; line-height:1.2}
 .tile{flex:1 1 120px; background:linear-gradient(180deg,#20252B,#191D22); border:1px solid var(--line);
   border-radius:6px; padding:8px 11px}
 .tile b{display:block; font-size:21px; line-height:1.15; color:var(--text)}
@@ -169,13 +179,14 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <section id="main" class="card" hidden>
   <div class="row" id="evTabs" hidden style="margin:-2px 0 10px"></div>
   <h2>Leaderboard <span id="eventName" class="meta" style="text-transform:none; letter-spacing:0; font-weight:400"></span></h2>
-  <div class="note" id="window"></div>
-  <div class="row" style="margin-top:9px">
+  <div class="headline" id="headline"></div>
+  <div class="when" id="when"></div>
+  <div class="prizes" id="prizes" hidden></div>
+  <div class="row" style="margin-top:11px">
     <span class="meta" id="updated"></span>
     <button id="refresh" class="linkish">Refresh now</button>
     <span class="meta" id="status"></span>
   </div>
-  <div class="tiles" id="tiles"></div>
   <div class="podium" id="podium" hidden></div>
   <div id="error" class="err" hidden></div>
   <div class="note" id="autoBox">
@@ -198,6 +209,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
       <tbody id="board"></tbody>
     </table>
   </div>
+  <div class="tiles" id="tiles"></div>
   <p class="hint" id="estNote" hidden><b>Adjusted %</b> for this event uses an <i>estimated</i> starting split:
     per-stat recording only began part way through, so your four stats as they are now have been wound back to the
     total you started on. It is exact for anyone under the cap, and close for everyone else. Events from here on
@@ -250,7 +262,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-09 15:37";
+const BUILD = "2026-10-09 16:23";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -463,11 +475,21 @@ function render(data){
   $("eventName").innerHTML = (ev.name? "· " + esc(ev.name) : "")
     + (!ev.from? "" : now>=ev.from&&now<=ev.to? ` <span class="pill live">live</span>`
        : now<ev.from? ` <span class="pill">upcoming</span>` : ` <span class="pill">finished</span>`);
-  const w=$("window");
-  if(!ev.from || !ev.to){ w.textContent = "No event set yet — leadership will open one."; }
-  else if(now < ev.from){ w.innerHTML = `Opens <b>${fmtWhen(ev.from)}</b> — in ${fmtLeft(ev.from-now)}. Nothing to do; your starting point is taken for you.`; }
-  else if(now > ev.to){ w.innerHTML = `Finished <b>${fmtWhen(ev.to)}</b>. Final board below.`; }
-  else { w.innerHTML = `Running until <b>${fmtWhen(ev.to)}</b> — ${fmtLeft(ev.to-now)} left.`; }
+  $("headline").textContent = ev.name || (ev.from? "Training event" : "No event yet");
+  const w=$("when");
+  if(!ev.from || !ev.to){ w.textContent = "Leadership will open one."; }
+  else if(now < ev.from){ w.innerHTML = `<b>${fmtWhen(ev.from)}</b> to <b>${fmtWhen(ev.to)}</b> · opens in ${fmtLeft(ev.from-now)}`; }
+  else if(now > ev.to){ w.innerHTML = `<b>${fmtWhen(ev.from)}</b> to <b>${fmtWhen(ev.to)}</b> · finished`; }
+  else { w.innerHTML = `<b>${fmtWhen(ev.from)}</b> to <b>${fmtWhen(ev.to)}</b> · ${fmtLeft(ev.to-now)} left`; }
+
+  // prizes, only the places leadership actually filled in
+  const pz = ev.prizes || {};
+  const places = [[1,"1st"],[2,"2nd"],[3,"3rd"]].filter(([n])=>pz[n]);
+  $("prizes").hidden = !places.length;
+  $("prizes").innerHTML = places.map(([n,label])=>
+      `<div class="prize p${n}">`
+    + (pz[n].id? `<img src="https://www.torn.com/images/items/${pz[n].id}/large.png" alt="" loading="lazy">` : "")
+    + `<span><span class="pl">${label}</span><br><span class="pn">${esc(pz[n].name)}</span></span></div>`).join("");
   $("updated").textContent = "updated " + fmtClock(now||Math.floor(Date.now()/1000));
 
   const scored = rows.filter(r=>r.adj>0);
@@ -479,9 +501,11 @@ function render(data){
     + `<div class="tile"><b>${avg? "+"+avg.toFixed(2)+"%" : "—"}</b><span>average of those moving</span></div>`
     + `<div class="tile"><b>${now>=ev.from&&now<=ev.to? fmtLeft(ev.to-now) : now<ev.from? fmtLeft(ev.from-now) : "over"}</b><span>${now<ev.from?"until it opens":"left to run"}</span></div>`;
 
+  // the podium is a result, so it waits until there is one
+  const over = !!(ev.to && now > ev.to);
   const top3 = scored.slice(0,3);
-  $("podium").hidden = top3.length<2;
-  $("podium").innerHTML = top3.length<2 ? "" : top3.map((r,i)=>
+  $("podium").hidden = !over || top3.length<2;
+  $("podium").innerHTML = (!over || top3.length<2) ? "" : top3.map((r,i)=>
       `<div class="pod p${i+1} ${me&&r.id===me.id?"me":""}">`
     + `<div class="pmedal">${medals[i]}</div>`
     + `<div class="pname">${esc(r.name||("["+r.id+"]"))}</div>`

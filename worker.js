@@ -55,7 +55,8 @@ export default {
         if (to <= from) return json({ error: "the end must be after the start" }, 400, cors);
         const ev = { id: String(from) + "-" + Math.random().toString(36).slice(2, 6),
                      name: (url.searchParams.get("name") || "").slice(0, 40),
-                     from, to, users: {}, locked: false, archived: false, keyTest: null };
+                     from, to, users: {}, locked: false, archived: false, keyTest: null,
+                     prizes: readPrizes(url) };
         doc.events.push(ev);
         doc.nextPoll = 0;
         await save();
@@ -68,6 +69,7 @@ export default {
         const ev = evOf(doc, url.searchParams.get("ev")) || doc.events[0];
         if (!ev) return json({ error: "there is no event to edit" }, 400, cors);
         if (url.searchParams.has("name")) ev.name = (url.searchParams.get("name") || "").slice(0, 40);
+        if (url.searchParams.has("prizes")) ev.prizes = readPrizes(url);   // "prizes=1" means these are the prizes
         if (url.searchParams.has("to")) {
           const to = +url.searchParams.get("to") || 0;
           if (to <= ev.from) return json({ error: "the end must be after the start" }, 400, cors);
@@ -199,7 +201,7 @@ export default {
       }
       const events = doc.events
         .slice().sort((a, b) => a.from - b.from)
-        .map(ev => ({ id: ev.id, name: ev.name, from: ev.from, to: ev.to,
+        .map(ev => ({ id: ev.id, name: ev.name, from: ev.from, to: ev.to, prizes: ev.prizes || null,
                       open: now >= ev.from && now <= ev.to, locked: !!ev.locked,
                       board: boardFor(ev), keyTest: isAdmin ? (ev.keyTest || null) : null }));
       const first = events.find(e => e.open) || events[events.length - 1] || null;
@@ -241,25 +243,6 @@ export default {
       }
       const doc = await env.LEDGER.get(key, "json");
       return json(doc || { terms: null }, 200, cors);
-    }
-    if (url.pathname.endsWith("/probe38")) {   // TEMPORARY: which log type is "used a xanax"?
-      const k = env.TORN_API_KEY;
-      const t = await (await fetch("https://api.torn.com/torn/?selections=logtypes&key=" + k + "&comment=CKProbe")).json();
-      const T = t.logtypes || t;
-      const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
-      const mine = (keys["309593"] || {}).key;
-      const doc = migrate(await env.LEDGER.get("train", "json"));
-      const ev = doc.events[doc.events.length - 1];
-      let sample = null;
-      if (mine) {
-        const r = await (await fetch("https://api.torn.com/user/?selections=log&cat=62&limit=20"
-          + "&key=" + encodeURIComponent(mine) + "&comment=CKProbe")).json();
-        const rows = Object.values(r.log || {});
-        sample = { count: rows.length, titles: [...new Set(rows.map(e => e.log + " " + e.title))].slice(0, 8),
-                   one: rows[0] || null };
-      }
-      return json({ drugTypes: Object.entries(T).filter(([, v]) => /xanax|drug/i.test(String(v))).slice(0, 15),
-                    logSample: sample }, 200, cors);
     }
     if (url.pathname.endsWith("/status")) {
       const meta = (await env.LEDGER.get("meta", "json")) || { note: "worker has not ticked yet — check the cron trigger" };
@@ -363,6 +346,23 @@ function migrate(doc){
   doc.readers = {}; doc.armLog = []; doc.armIds = []; doc.armCur = 0;   // the armoury backfills itself
   return doc;
 }
+/* Prizes are optional and set by leaders: p1/p2/p3, each "<itemId>:<name>".
+   Only the places actually filled in are stored, so the members' page can show
+   one, two or three without being told which. */
+function readPrizes(url){
+  const out = {};
+  for (const n of [1, 2, 3]) {
+    const raw = (url.searchParams.get("p" + n) || "").trim();
+    if (!raw) continue;
+    const at = raw.indexOf(":");
+    const id = at > 0 ? +raw.slice(0, at) : 0;
+    const name = (at > 0 ? raw.slice(at + 1) : raw).slice(0, 50).trim();
+    if (!name) continue;
+    out[n] = id > 0 ? { id, name } : { name };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 function evOf(doc, id){ return (doc.events || []).find(e => String(e.id) === String(id)) }
 
 // Faction xanax is kept as one timestamped log, so any event — including one
