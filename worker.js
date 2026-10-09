@@ -176,7 +176,7 @@ export default {
           gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
           adj: scoreOf(u, g), exact: !!u.fs, split: !!u.ls, jump: jumpOf(doc, ev, uid, u, now),
           xan: xanFor(doc, ev, uid, now),
-          own: Math.max(0, (u.xan || 0) - (u.firstX || 0)),
+          own: ownXan(doc, ev, uid, u, now),
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
           cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
           gymE: u.gymE != null ? u.gymE : null, fromLog: !!u.fromLog,
@@ -350,10 +350,25 @@ function evOf(doc, id){ return (doc.events || []).find(e => String(e.id) === Str
 // Faction xanax is kept as one timestamped log, so any event — including one
 // created later — can count its own window out of it without re-reading Torn.
 function xanFor(doc, ev, uid, upto){
-  const hi = Math.min(ev.to, upto);
+  return xanBetween(doc, uid, ev.from, Math.min(ev.to, upto));
+}
+function xanBetween(doc, uid, from, to){
   let n = 0;
-  for (const e of (doc.armLog || [])) if (String(e.u) === String(uid) && e.t >= ev.from && e.t <= hi) n++;
+  for (const e of (doc.armLog || [])) if (String(e.u) === String(uid) && e.t >= from && e.t <= to) n++;
   return n;
+}
+
+/* Torn's drugs.xanax is LIFETIME xanax taken and does not say where each one
+   came from — the faction's are in there too. So "own" is the rise in that
+   counter minus the faction ones over the SAME stretch, and it is only
+   meaningful if the counter's baseline was taken when the event opened.
+   Otherwise we genuinely do not know, and say so rather than guess. */
+function ownXan(doc, ev, uid, u, now){
+  if (u.firstX == null || u.firstXAt == null) return null;
+  if (u.firstXAt > ev.from + 300) return null;          // baseline too late to mean anything
+  const upto = Math.min(ev.to, now);
+  const total = Math.max(0, (u.xan || 0) - u.firstX);
+  return Math.max(0, total - xanBetween(doc, uid, u.firstXAt, upto));
 }
 
 function finalBoard(doc, ev){
@@ -364,7 +379,7 @@ function finalBoard(doc, ev){
       gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw, kept for the detail view
       adj: scoreOf(u, g), exact: !!u.fs,
       xan: xanFor(doc, ev, uid, now),
-      own: Math.max(0, (u.xan || 0) - (u.firstX || 0)),
+      own: ownXan(doc, ev, uid, u, Math.floor(Date.now() / 1000)),
       refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
       cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)) };
   }).sort((a, b) => b.adj - a.adj).slice(0, HIST_ROWS);
@@ -461,7 +476,7 @@ function jumpOf(doc, ev, uid, u, now){
   if (perEnergy <= 0) return null;
   const implied = gain / perEnergy;
   const secs = Math.max(0, Math.min(ev.to, now) - (u.firstAt || ev.from));
-  const xan = xanFor(doc, ev, uid, now) + Math.max(0, (u.xan || 0) - (u.firstX || 0));
+  const xan = xanFor(doc, ev, uid, now) + (ownXan(doc, ev, uid, u, now) || 0);
   const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
   const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
   // measured beats estimated: if their log is readable, that IS the energy
@@ -629,7 +644,7 @@ function applyReading(u, t, r, maxE){
     // later left its baseline unset, and its "delta" was the lifetime total.
     if (u.firstR == null) u.firstR = r.cons.ref;
     if (u.firstD == null) u.firstD = r.cons.drk;
-    if (u.firstX == null) u.firstX = r.cons.xan;
+    if (u.firstX == null) { u.firstX = r.cons.xan; u.firstXAt = t }
     u.ref = r.cons.ref; u.drk = r.cons.drk; u.xan = r.cons.xan;
     u.fullAt = t;
   }
