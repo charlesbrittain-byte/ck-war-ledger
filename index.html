@@ -905,7 +905,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-08 16:49</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-09 14:29</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2831,11 +2831,13 @@ function renderEvent(j){
       td.textContent = on? "auto" : "manual";
       td.className = on? "pos" : "meta";
     }
-    const names=(e.enrolled||[]).map(x=>esc(x.name||("["+x.id+"]")));
+    const withLog=(e.enrolled||[]).filter(x=>x.log && x.log.length);
+    const names=(e.enrolled||[]).map(x=>esc(x.name||("["+x.id+"]"))+(x.log&&x.log.length?" \u26a1":""));
     const byHand=rows.filter(r=>!ids.has(r.id)).length;
     $("evEnrolled").innerHTML = names.length
       ? `<b class="pos">${names.length}</b> opted in to automatic recording`
         + (byHand? ` · <b class="neg">${byHand}</b> on the board are recording by hand` : "")
+        + ` · <b class="${withLog.length?"pos":"neg"}">${withLog.length}</b> sharing their gym log \u26a1`
         + ` <span class="meta">— ${names.join(", ")}</span>`
       : `<span class="neg">Nobody has opted in yet</span> — without it they must tap Record themselves when the event opens.`;
   }).catch(()=>{ $("evEnrolled").textContent="" });
