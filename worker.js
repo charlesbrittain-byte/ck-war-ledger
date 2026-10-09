@@ -99,6 +99,42 @@ export default {
         return json({ ok: true, banked }, 200, cors);
       }
 
+      /* Backfill a finished event from the logs of members who only shared their
+         gym log afterwards. The normal reading pass skips locked events — there
+         is nothing left to sample — but a log reaches backwards, so somebody who
+         connected a log key after the close can still have their real baseline,
+         curve and energy recovered. One call per member, on a button. */
+      if (url.searchParams.has("rebuild")) {
+        if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
+        const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
+        const only = url.searchParams.get("ev");
+        const done = [];
+        for (const ev of doc.events) {
+          if (only && ev.id !== only) continue;
+          for (const [id, u] of Object.entries(ev.users || {})) {
+            if (u.fromLog) { done.push({ ev: ev.id, name: u.name, skipped: "already from the log" }); continue }
+            if (!keys[id] || !keys[id].log) { done.push({ ev: ev.id, name: u.name, skipped: "no log key" }); continue }
+            const sess = await gymSessions(keys[id].key, ev.from, ev.to);
+            if (!sess) { done.push({ ev: ev.id, name: u.name, skipped: "log unreadable" }); continue }
+            if (!sess.length) { done.push({ ev: ev.id, name: u.name, skipped: "no gym sessions in the window" }); continue }
+            // the stats as they were at the END of the event, not as they are now:
+            // a stat untrained during the event may well have been trained since
+            const endStats = u.ls || u.fs;
+            const rb = fromSessions(sess, endStats, ev.from);
+            if (!rb) { done.push({ ev: ev.id, name: u.name, skipped: "no per-stat reading to build on" }); continue }
+            const was = { first: u.first, gymE: u.gymE || null };
+            u.first = rb.first; u.fs = rb.fs; u.fsEst = false;
+            u.gymE = rb.energy; u.fromLog = true; u.s = rb.series.slice();
+            const xl = await xanaxFromLog(keys[id].key, ev.from, ev.to);
+            if (xl != null) u.xanLog = xl;
+            done.push({ ev: ev.id, name: u.name, sessions: sess.length, energy: rb.energy,
+                        baselineWas: was.first, baselineNow: rb.first, xanax: xl });
+          }
+        }
+        await save();
+        return json({ ok: true, rebuilt: done }, 200, cors);
+      }
+
       // Joining one event. The key is held from the first sign-up, so this is a
       // click: it only says "count me in this time".
       if (url.searchParams.has("join") || url.searchParams.has("unjoin")) {
@@ -225,7 +261,7 @@ export default {
                       board: boardFor(ev), keyTest: isAdmin ? (ev.keyTest || null) : null }));
       const first = events.find(e => e.open) || events[events.length - 1] || null;
       return json({ events, now, you: id || null, enrolled: enrolledMe, history,
-                    scoring: { cap: CAP, p: PEXP, ref: REF },
+                    scoring: { a: AEXP, p: PEXP, ref: REF, floor: FLOOR },
                     // what a page written before multiple events understands
                     event: first ? { from: first.from, to: first.to, name: first.name } : {},
                     open: !!(first && first.open), board: first ? first.board : [],
@@ -467,60 +503,62 @@ async function archiveEvent(env, doc, ev){
 }
 
 /* ---------------- scoring ----------------
-   Gym gains scale with the stat up to CAP and are heavily dampened above it, so
-   ranking on plain % gain punishes big players for being big. The denominator
-   is therefore the sum of the four stats AS THEY WERE AT THE BASELINE, each
-   capped. That handles the dampening above CAP, but below it a smaller player
-   still gains a larger PERCENTAGE for the same work, so P tilts the whole scale:
-   the score is divided by denom^P instead of denom. P=1 is plain capped
-   percentage (small players keep their full advantage), lower P hands more back
-   to bigger players. REF anchors the scale, so a player capped on all four
-   stats scores the same at every P and everyone else rotates around them. */
-const CAP = 50000000;          // per stat
-const TAIL = 0.03;             // what a point of stat ABOVE the cap is worth against one below
-const FLOOR = 2000;            // see below — measured, not guessed
-const PEXP = 1;                // a tilt on top of the above; 1 = none
-const REF = 4 * (CAP + FLOOR); // the scale anchor: a player capped on all four
+   Ranking on plain % gain punishes big players badly, because gym gains do not
+   keep pace with the stat: per unit of energy they scale as roughly the SQUARE
+   ROOT of the stat total, so the percentage you can gain falls away as you grow.
 
-/* FLOOR is measured from 1,654 of spill_298's own gym trainings — his whole
-   history, 18 gyms, stats from 24 to 6.2 million.
+   That exponent is measured, not assumed — see the fit below. Dividing the gain
+   by total^A, where A is that exponent, cancels size out entirely and leaves a
+   pure measure of the energy someone put in. PEXP sits just above A, so a big
+   player has to work slightly harder for the same score, which is deliberate.
 
-   Fitting  gain per 1000 energy = B x (stat + FLOOR) / stat  x gymFactor
-   lands on B = 4.54% and FLOOR = 2,000, with a median relative error of 2.3%
-   across the 1,200 normal trainings above 800 stat. Every size band agrees on
-   its own: 993 stat implies 1,742, 62k implies 1,200, 277k implies 1,612.
+   REF only anchors the scale: a member whose four stats total REF scores exactly
+   their raw percentage gain, and everyone else rotates around them. Changing it
+   moves every score by the same factor and changes no ranking.
 
-   The earlier figure of 19,875 was wrong, and wrong for an interesting reason.
-   It came from ten trainings members posted in chat, and the one that drove it
-   — a 1,809-stat player returning 74.63% per 1000 energy — was a happy jump,
-   not a size effect. A normal training at that size returns about 12.5%. Fit a
-   size curve through a happy jump and you conclude small players are five times
-   more efficient than they are.
+   Measured from 1,438 real gym trainings taken from the logs of two members 779x
+   apart in size — spill_298 at a median 7.26M total and Top at 5.65bn — with
+   identical happy intensity (both a median 0.500 happy per energy, so happy is
+   not driving the difference):
 
-   What the clean data actually says: the size advantage is real but small and
-   gone by about 40k a stat. 993 stat gets 12.5% per 1000 energy, 25k gets 5.1%,
-   62k gets 4.6%, and from there to 6.2 million it sits at 4.56%. So for anyone
-   above ~40k a stat, raw percentage gain was already fair.
+     median gain per energy    101.0  at 7.26M total
+                             3,118.2  at 5.65bn total
 
-   Gym makes little difference per unit of energy: across all 18, the factors
-   span 0.83 (Deep Burn) to 1.42 (Global Gym), and the gyms our members use sit
-   within about 20% of each other. Not worth modelling.
+   Median-to-median that is an exponent of 0.515, and an ordinary least squares
+   fit across all 1,438 sessions individually gives 0.516. Two independent routes
+   to the same number, so A is well pinned down.
 
-   Happy jumps are a different matter entirely, and they are what the earlier
-   fits kept mistaking for size. 287 of these trainings returned more than twice
-   the baseline, median 2.8x and up to 38.8x. That is why the board shows a
-   burst column rather than trying to price jumps into the score. */
+   What this replaced: a per-stat cap at 50M with a 3% tail above it, and P=1.
+   At each player's own typical efficiency that scheme paid a 7M member 1.6x what
+   it paid a 5.65bn member for the same energy. At PEXP=0.535 the same comparison
+   is 1.10x — the tilt, and nothing more.
 
-// A hard cap says stat above 50M counts for nothing, which flatters a very big
-// player enormously: 5.5B of stats would be priced at 200M. Torn dampens gains
-// up there, it does not stop them, so the excess still counts — at TAIL of what
-// a point below the cap is worth.
-function capped(v){ return Math.min(v, CAP) + Math.max(0, v - CAP) * TAIL + FLOOR }
+   The honest limit, and it matters: the exponent is measured between about 2.5M
+   and 5.65bn total, and inside that band it is excellent — binned medians sit
+   within 1.00x of the curve right across it. BELOW ~2.5M it is extrapolation and
+   it is probably too harsh. spill_298's own history runs down to 24 stat, and
+   down there he managed a median 0.14 stat per energy where this curve predicts
+   1.80 — but his early years are confounded with bad gyms and no happy routine,
+   so that cannot be read as a pure size effect either. There is a real 5x step
+   in his gain per energy between 1.7M and 2.9M total, which is him changing gym
+   and starting to use happy properly, and no smooth curve fits through it.
+
+   So for anyone under ~2.5M total the score is provisional. FLOOR damps it but
+   does not settle it; at P=0.535 the ordering of a small member is the same at
+   every FLOOR from 0 to 5M. Only a gym log from a genuinely small member will
+   settle it. Every further log-sharer tightens this. */
+const AEXP  = 0.515;        // measured: gain per energy scales as total^AEXP
+const PEXP  = 0.535;        // AEXP plus the deliberate tilt against big players
+const REF   = 10000000;     // scale anchor: a 10M-total member scores their raw %
+const FLOOR = 500000;       // on the TOTAL, where the measured range runs out
+const GFLOOR = 2000;        // the gym curve's own floor, per stat (see jumpOf)
 
 function denomOf(u){
-  if (u.fs) return capped(u.fs.s || 0) + capped(u.fs.d || 0) + capped(u.fs.p || 0) + capped(u.fs.x || 0);
-  return Math.min(u.first || 0, REF) + 4 * FLOOR;   // no per-stat baseline on file: the fallback
+  const t = u.fs ? (u.fs.s || 0) + (u.fs.d || 0) + (u.fs.p || 0) + (u.fs.x || 0)
+                 : (u.first || 0);
+  return t + FLOOR;
 }
+
 /* Happy jumps are allowed, so the score ignores them — but they are worth
    seeing. A jump is not a big gain, it is a big gain FOR THE ENERGY SPENT, so
    the test is to price the gain in energy at normal efficiency and compare it
@@ -534,14 +572,14 @@ function denomOf(u){
 
    The energy estimate is deliberately generous. Over-stating what someone had
    available can only hide a jump; it can never invent one. */
-const BASE = 4.54;             // % gain per 1000 energy, measured (see FLOOR)
+const GK = 0.029485;           // stat points per energy at a total of 1, measured
 const JUMP_AT = 2;             // below this it is ordinary training
 
 function jumpOf(doc, ev, uid, u, now){
   if (!(u.first > 0)) return null;
   const gain = (u.last || 0) - (u.first || 0);
   if (gain <= 0) return null;
-  const perEnergy = (BASE / 100000) * (u.first / 4 + FLOOR);   // stat points per energy
+  const perEnergy = GK * Math.pow((u.first || 0) + 4 * GFLOOR, AEXP);   // stat points per energy
   if (perEnergy <= 0) return null;
   const implied = gain / perEnergy;
   const secs = Math.max(0, Math.min(ev.to, now) - (u.firstAt || ev.from));

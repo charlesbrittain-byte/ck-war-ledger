@@ -217,13 +217,16 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <div class="tiles" id="tiles"></div>
   <p class="hint" id="estNote" hidden><b>Adjusted %</b> for this event uses an <i>estimated</i> starting split:
     per-stat recording only began part way through, so your four stats as they are now have been wound back to the
-    total you started on. It is exact for anyone under the cap, and close for everyone else. Events from here on
+    total you started on. Only the total matters to the score, so this is close for everyone. Events from here on
     record the real split from the first second.</p>
-  <p class="hint">Ranking is on <b>Adjusted %</b>. Smaller players gain a bigger <i>percentage</i> for the same work,
-    and above 50M per stat Torn heavily dampens gains, so raw % gain is a poor measure at both ends. Adjusted does two
-    things: it caps each of your four stats at 50M, and it tilts the whole scale so that being big is less of a
-    penalty. It is a fixed calculation — your score does not depend on who else entered. Smaller players are still
-    favoured, just not by the length of the street.
+  <p class="hint">Ranking is on <b>Adjusted %</b>. Raw % gain is a poor measure, because gym gains do not keep pace
+    with your stats: per unit of energy they scale as roughly the <i>square root</i> of your total, so the bigger you
+    get the smaller a percentage the same work buys. Adjusted divides your gain by your starting total raised to a
+    fixed power instead, which cancels size out and leaves a measure of the energy you actually put in. That power is
+    measured from real gym logs — 1,438 trainings from members 779&times; apart in size, who happened to train at
+    identical happy. It is a fixed calculation: your score does not depend on who else entered. Bigger players are
+    still given a slightly harder time, on purpose, but only slightly — about 10% over that whole size range, where
+    the old capped scheme cost them 60%.
     <br><br>A <b>&#9889; multiplier</b> beside a name means that person gained several times more than the energy
     they got through can normally buy — which is what a happy jump looks like from the outside. It is shown for
     interest and <b>does not change anyone's score</b>; jumps are allowed. Nothing appears for ordinary training.
