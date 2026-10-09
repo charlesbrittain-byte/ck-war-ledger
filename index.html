@@ -2623,6 +2623,7 @@ function showTab(t){
   $("switchWar").hidden = !inWar;
   $("vsline").hidden = !inWar;
   if(dashTab==="faction"){
+    loadClub();
     loadEvent().then(()=>mark("event")).catch(()=>{});
     if(!homeRows) Promise.resolve(loadHome()).then(()=>mark("form")).catch(()=>{});
     if(!ocRaw) Promise.resolve(loadOC()).then(()=>mark("OC")).catch(()=>{});
@@ -2825,6 +2826,31 @@ const prizeId=name=>{ const f=PRIZE_ITEMS.find(i=>i.n.toLowerCase()===(name||"")
 const prizeParams=()=>{ const o={prizes:1};
   for(const n of [1,2,3]){ const v=($("evP"+n).value||"").trim(); if(v) o["p"+n]=prizeId(v)+":"+v }
   return o };
+/* The roll of everyone who has handed over a key. Deliberately independent of
+   the event card: it should be there whether or not an event exists, and it was
+   not, because it was being drawn from inside renderEvent. */
+async function loadClub(){
+  if(!cfg.syncUrl) return;
+  try{
+    const e = await evCall({enrolled:1, ev:evPicked||""});
+    const list=(e.enrolled||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+    $("clubMeta").textContent = list.length
+      ? list.length + " with a key · " + list.filter(x=>x.log).length + " sharing their gym log"
+      : "nobody has connected yet";
+    $("clubBody").innerHTML = list.length ? list.map(x=>
+        `<tr><td style="text-align:left" class="name">${esc(x.name||("["+x.id+"]"))}</td>`
+      + `<td style="text-align:left" class="meta">${x.at? fmtDT(x.at) : "—"}</td>`
+      + `<td class="${x.log?"pos":"meta"}">${x.log? "yes" : "no"}</td>`
+      + `<td class="${x.inEvent?"pos":"meta"}">${x.inEvent==null? "—" : x.inEvent? "in" : "not in"}</td>`
+      + `<td><button class="mini" data-drop="${x.id}">Remove</button></td></tr>`).join("")
+      : `<tr><td colspan="5" class="meta">Nobody has connected a key yet.</td></tr>`;
+    for(const b of $("clubBody").querySelectorAll("[data-drop]")) b.onclick=async()=>{
+      if(!confirm("Remove this member's key? They would have to connect again.")) return;
+      b.disabled=true;
+      try{ await evCall({leave:1, id:b.dataset.drop}); loadClub() }catch(err){ b.disabled=false }
+    };
+  }catch(err){ $("clubMeta").textContent = err.message || "could not read the member list" }
+}
 let evPicked=null, evLast=null;
 function renderEvent(j){
   evLast=j;
@@ -2871,26 +2897,7 @@ function renderEvent(j){
     + `<td style="text-align:left" class="${now-r.updated>3*3600?"neg":"meta"}">${ago(r.updated)}</td>`
     + `<td style="text-align:left" class="meta" data-auto="${r.id}">·</td></tr>`).join("");
 
-  evCall({enrolled:1, ev:evPicked||""}).then(e=>{
-    const list=(e.enrolled||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
-    $("clubMeta").textContent = list.length
-      ? list.length + " with a key · " + list.filter(x=>x.log).length + " sharing their gym log"
-      : "nobody has connected yet";
-    $("clubBody").innerHTML = list.map(x=>
-        `<tr><td style="text-align:left" class="name">${esc(x.name||("["+x.id+"]"))}</td>`
-      + `<td style="text-align:left" class="meta">${x.at? fmtDT(x.at) : "—"}</td>`
-      + `<td class="${x.log?"pos":"meta"}">${x.log? "yes" : "no"}</td>`
-      + `<td class="${x.inEvent?"pos":"meta"}">${x.inEvent==null? "—" : x.inEvent? "in" : "not in"}</td>`
-      + `<td><button class="mini" data-drop="${x.id}">Remove</button></td></tr>`).join("")
-      || `<tr><td colspan="5" class="meta">Nobody has connected a key yet.</td></tr>`;
-    for(const b of $("clubBody").querySelectorAll("[data-drop]")) b.onclick=async()=>{
-      if(!confirm("Remove this member's key? They would have to connect again.")) return;
-      b.disabled=true;
-      try{ await evCall({leave:1, id:b.dataset.drop}); renderEvent(await evCall({hist:1})) }
-      catch(err){ b.disabled=false }
-    };
-  }).catch(()=>{ $("clubMeta").textContent="" });
-
+  loadClub();
   evCall({enrolled:1}).then(e=>{
     const ids=new Set((e.enrolled||[]).map(x=>x.id));
     for(const td of document.querySelectorAll("#evtblBody [data-auto]")){
