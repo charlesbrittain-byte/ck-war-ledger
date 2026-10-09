@@ -56,7 +56,7 @@ export default {
         const ev = { id: String(from) + "-" + Math.random().toString(36).slice(2, 6),
                      name: (url.searchParams.get("name") || "").slice(0, 40),
                      from, to, users: {}, locked: false, archived: false, keyTest: null,
-                     prizes: readPrizes(url) };
+                     prizes: readPrizes(url), roster: {} };
         doc.events.push(ev);
         doc.nextPoll = 0;
         await save();
@@ -97,6 +97,21 @@ export default {
         doc.events = doc.events.filter(e => e !== ev);
         await save();
         return json({ ok: true, banked }, 200, cors);
+      }
+
+      // Joining one event. The key is held from the first sign-up, so this is a
+      // click: it only says "count me in this time".
+      if (url.searchParams.has("join") || url.searchParams.has("unjoin")) {
+        const id = +url.searchParams.get("id") || 0;
+        const ev = evOf(doc, url.searchParams.get("ev"));
+        if (!id || !ev) return json({ error: "need a member and an event" }, 400, cors);
+        if (ev.to < now) return json({ error: "that event has finished" }, 400, cors);
+        ev.roster = ev.roster || {};
+        if (url.searchParams.has("unjoin")) { delete ev.roster[id]; delete ev.users[id] }
+        else ev.roster[id] = now;
+        doc.nextPoll = 0;                       // pick them up on the next tick
+        await save();
+        return json({ ok: true, joined: !!ev.roster[id] }, 200, cors);
       }
 
       // Opting in: a member hands over their own key so the worker can take the
@@ -141,8 +156,10 @@ export default {
       if (url.searchParams.has("enrolled")) {          // leaders: who opted in, names only
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
+        const evR = evOf(doc, url.searchParams.get("ev")) || doc.events[doc.events.length - 1];
         return json({ enrolled: Object.entries(keys).map(([id, v]) => ({ id: +id, name: v.name, at: v.at,
-                      log: !!v.log })) }, 200, cors);
+                      log: !!v.log,
+                      inEvent: evR && evR.roster ? (evR.roster[id] != null) : null })) }, 200, cors);
       }
 
       const id = +url.searchParams.get("id") || 0;
@@ -202,6 +219,8 @@ export default {
       const events = doc.events
         .slice().sort((a, b) => a.from - b.from)
         .map(ev => ({ id: ev.id, name: ev.name, from: ev.from, to: ev.to, prizes: ev.prizes || null,
+                      signedUp: ev.roster ? Object.keys(ev.roster).length : null,
+                      youIn: ev.roster ? (id ? ev.roster[id] != null : false) : true,
                       open: now >= ev.from && now <= ev.to, locked: !!ev.locked,
                       board: boardFor(ev), keyTest: isAdmin ? (ev.keyTest || null) : null }));
       const first = events.find(e => e.open) || events[events.length - 1] || null;
@@ -833,9 +852,10 @@ async function tickTraining(env, t, atWar) {
   }
 
   // gym energy is per event, because each event has its own window
+  const inEvent = (ev, id) => !ev.roster || ev.roster[id] != null;   // no roster = an event from before opt-in
   for (const ev of active) {
     for (const [id, r] of Object.entries(reads)) {
-      if (!r.gymKey) continue;
+      if (!inEvent(ev, id) || !r.gymKey) continue;
       const upto = Math.min(ev.to, t);
       const sess = await gymSessions(r.gymKey, ev.from, upto);
       if (sess) r.rebuilt = fromSessions(sess, r.stats, ev.from);
@@ -843,6 +863,7 @@ async function tickTraining(env, t, atWar) {
       if (xl != null) r.xanLog = xl;
     }
     for (const [id, r] of Object.entries(reads)) {
+      if (!inEvent(ev, id)) continue;
       let u = ev.users[id];
       if (!u) u = ev.users[id] = { name: keys[id].name, first: r.total, firstAt: t, s: [],
                                    fs: r.stats || null };          // the baseline split, captured once

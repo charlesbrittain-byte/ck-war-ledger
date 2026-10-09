@@ -183,6 +183,10 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <div class="when" id="when"></div>
   <div class="prizes" id="prizes" hidden></div>
   <div class="note" id="standby" hidden></div>
+  <div class="row" id="joinRow" hidden style="margin-top:12px">
+    <button class="primary" id="joinBtn">Sign up to this event</button>
+    <span class="meta" id="joinNote"></span>
+  </div>
   <div class="row" style="margin-top:11px">
     <span class="meta" id="updated"></span>
     <button id="refresh" class="linkish">Refresh now</button>
@@ -263,7 +267,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-09 16:39";
+const BUILD = "2026-10-09 16:43";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -449,6 +453,17 @@ function renderHist(hist){
 }
 
 const num = v => (v==null? "—" : v===0? "0" : v.toLocaleString());
+// The key is already held, so joining an event is one click and nothing else.
+async function joinEvent(evId, on){
+  const u = new URL(WORKER + "/train");
+  u.searchParams.set("token", GAMES_TOKEN);
+  u.searchParams.set(on? "join":"unjoin", "1");
+  u.searchParams.set("ev", evId);
+  u.searchParams.set("id", me.id);
+  const j = await (await fetch(u)).json();
+  if(j.error) throw new Error(j.error);
+  return j;
+}
 // one pill per xanax, because a number is just a number
 const XAN = "https://www.torn.com/images/items/206/large.png";
 const pills = n => { n = n||0;
@@ -497,6 +512,29 @@ function render(data){
       + (data.enrolled                      // the module-level flag is set later in this function
         ? ` You are signed up: your starting point is taken automatically the moment the next event opens, so there is nothing to come back and do.`
         : ` Connect your key and you are in the next one.`);
+  }
+
+  // one-click entry for an event that has not finished
+  const canJoin = me && ev.id && ev.to && now <= ev.to && ev.youIn === false;
+  const jr = $("joinRow");
+  jr.hidden = !(canJoin || (me && ev.youIn === true && now <= (ev.to||0)));
+  if(!jr.hidden){
+    const joined = ev.youIn === true;
+    $("joinBtn").hidden = joined;
+    $("joinNote").innerHTML = joined
+      ? `<b>You're in.</b> Nothing else to do — your readings are taken for you.`
+        + ` <button class="linkish" id="leaveBtn">Not this one</button>`
+      : (ev.signedUp? `${ev.signedUp} signed up so far.` : `Be the first in.`);
+    $("joinBtn").onclick = async ()=>{
+      $("joinBtn").disabled=true; showErr("");
+      try{ await joinEvent(ev.id, true); render(await board({hist:1})) }
+      catch(e){ showErr(e.message) } finally{ $("joinBtn").disabled=false }
+    };
+    const lb=$("leaveBtn");
+    if(lb) lb.onclick = async ()=>{
+      if(!confirm("Take yourself out of this event? Anything recorded so far is lost.")) return;
+      try{ await joinEvent(ev.id, false); render(await board({hist:1})) }catch(e){ showErr(e.message) }
+    };
   }
 
   // prizes, only the places leadership actually filled in

@@ -515,6 +515,22 @@ details.settings summary{cursor:pointer}
     baseline is caught whatever time it starts. Anyone who has not opted in must tap Record themselves. Opening an event <b>clears the board</b>, so only do it when you mean to start fresh.</p>
 </section>
 
+<section id="clubCard" class="card" hidden>
+  <div class="scrubhead">
+    <h2 style="margin:0">Clubhouse members</h2>
+    <div class="meta" id="clubMeta"></div>
+  </div>
+  <div class="tblwrap">
+    <table id="clubTbl" style="min-width:420px">
+      <thead><tr><th style="text-align:left">Member</th><th style="text-align:left">Key given</th><th>Gym log</th><th>In selected event</th><th></th></tr></thead>
+      <tbody id="clubBody"></tbody>
+    </table>
+  </div>
+  <p class="hint">Everyone who has connected a key at <a href="games.html">the clubhouse</a>. The key is kept once and
+    reused, so joining each new event is a single click for them. Removing someone here deletes their key — they would
+    have to connect again.</p>
+</section>
+
 <!-- HOME ARMOURY -->
 <section id="homeArmCard" class="card" hidden>
   <div class="scrubhead">
@@ -914,7 +930,7 @@ details.settings summary{cursor:pointer}
   </div>
 </details>
 
-<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-09 16:23</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
+<p class="foot wrap"><span id="loadMeta" style="color:var(--faint)"></span><span id="buildStamp" style="color:var(--faint)">build 2026-10-09 16:43</span> · All times are TCT (Torn city time / UTC). Data comes straight from api.torn.com using your key and stays in this browser.</p>
 </div>
 
 <div id="ocback" class="modal-back">
@@ -2592,7 +2608,7 @@ $("payCsv").onclick=()=>{
 
 /* ---------- dashboard tabs ---------- */
 const WAR_CARDS=["scrubCard","tableCard","tlCard","medCard","armCard","chainCard","payCard","qualityCard"];
-const TABS={ faction:["facCard","homeArmCard","eventCard"], war:["homeCard","warpick"], oc:["ocCard","ocPartCard","ocTypeCard"] };
+const TABS={ faction:["facCard","homeArmCard","eventCard","clubCard"], war:["homeCard","warpick"], oc:["ocCard","ocPartCard","ocTypeCard"] };
 let dashTab = "faction";
 function showTab(t){
   dashTab = TABS[t]? t : "faction";
@@ -2854,6 +2870,26 @@ function renderEvent(j){
     + `<td style="text-align:left" class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late":"from the start"}</td>`
     + `<td style="text-align:left" class="${now-r.updated>3*3600?"neg":"meta"}">${ago(r.updated)}</td>`
     + `<td style="text-align:left" class="meta" data-auto="${r.id}">·</td></tr>`).join("");
+
+  evCall({enrolled:1, ev:evPicked||""}).then(e=>{
+    const list=(e.enrolled||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+    $("clubMeta").textContent = list.length
+      ? list.length + " with a key · " + list.filter(x=>x.log).length + " sharing their gym log"
+      : "nobody has connected yet";
+    $("clubBody").innerHTML = list.map(x=>
+        `<tr><td style="text-align:left" class="name">${esc(x.name||("["+x.id+"]"))}</td>`
+      + `<td style="text-align:left" class="meta">${x.at? fmtDT(x.at) : "—"}</td>`
+      + `<td class="${x.log?"pos":"meta"}">${x.log? "yes" : "no"}</td>`
+      + `<td class="${x.inEvent?"pos":"meta"}">${x.inEvent==null? "—" : x.inEvent? "in" : "not in"}</td>`
+      + `<td><button class="mini" data-drop="${x.id}">Remove</button></td></tr>`).join("")
+      || `<tr><td colspan="5" class="meta">Nobody has connected a key yet.</td></tr>`;
+    for(const b of $("clubBody").querySelectorAll("[data-drop]")) b.onclick=async()=>{
+      if(!confirm("Remove this member's key? They would have to connect again.")) return;
+      b.disabled=true;
+      try{ await evCall({leave:1, id:b.dataset.drop}); renderEvent(await evCall({hist:1})) }
+      catch(err){ b.disabled=false }
+    };
+  }).catch(()=>{ $("clubMeta").textContent="" });
 
   evCall({enrolled:1}).then(e=>{
     const ids=new Set((e.enrolled||[]).map(x=>x.id));
