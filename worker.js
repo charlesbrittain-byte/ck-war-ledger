@@ -110,6 +110,9 @@ export default {
           if (!k) return json({ error: "missing key" }, 400, cors);
           keys[id] = { key: k, name: (url.searchParams.get("name") || "").slice(0, 30), at: Math.floor(Date.now() / 1000) };
           keys[id].maxE = +url.searchParams.get("maxe") || await maxEnergy(k);
+          // A custom key can grant `log` without being a Full key. info.log is
+          // null either way — the marker is whether "log" is in the selections.
+          keys[id].log = await hasLog(k);
         }
         await env.LEDGER.put("trainkeys", JSON.stringify(keys));
         return json({ ok: true, enrolled: !!keys[id] }, 200, cors);
@@ -136,7 +139,8 @@ export default {
       if (url.searchParams.has("enrolled")) {          // leaders: who opted in, names only
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
-        return json({ enrolled: Object.entries(keys).map(([id, v]) => ({ id: +id, name: v.name, at: v.at })) }, 200, cors);
+        return json({ enrolled: Object.entries(keys).map(([id, v]) => ({ id: +id, name: v.name, at: v.at,
+                      log: !!v.log })) }, 200, cors);
       }
 
       const id = +url.searchParams.get("id") || 0;
@@ -175,6 +179,7 @@ export default {
           own: Math.max(0, (u.xan || 0) - (u.firstX || 0)),
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
           cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
+          gymE: u.gymE != null ? u.gymE : null,
           since: u.firstAt, updated: u.lastAt,
           lateBy: Math.max(0, u.firstAt - ev.from),
           series: ser
@@ -459,7 +464,9 @@ function jumpOf(doc, ev, uid, u, now){
   const xan = xanFor(doc, ev, uid, now) + Math.max(0, (u.xan || 0) - (u.firstX || 0));
   const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
   const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
-  const available = secs / 180                 // natural regen, 5 every 15 min
+  // measured beats estimated: if their log is readable, that IS the energy
+  const available = (u.gymE > 0) ? u.gymE
+                  : secs / 180                 // natural regen, 5 every 15 min
                   + xan * 250                  // xanax, faction and personal
                   + ref * (u.maxE || 150)      // a refill is a full bar
                   + drk * 50;                  // energy cans, pitched high
@@ -513,6 +520,52 @@ async function tickArmoury(env, doc, t, earliest){
   doc.armIds = [...seen].slice(-600);
 }
 
+/* With a key that grants `log`, the gym log gives the thing nothing else does:
+   energy_used per session, alongside trains, happy_used and the gym id. Summed
+   over the event window that is exactly "energy spent training" — no estimating
+   from xanax counts and assumed regen.
+
+   Accumulated rather than re-summed: v1 log returns the 100 most recent entries
+   and pages backwards with `to`, so re-reading a long event every time would
+   cost a pile of calls for an answer that only grows at the end. */
+// Whether a key can read logs. Stored at sign-up, but anyone enrolled before
+// this existed has no flag, so it is filled in on the next poll.
+async function hasLog(key){
+  try {
+    const ki = await (await fetch("https://api.torn.com/v2/key/info?key=" + encodeURIComponent(key))).json();
+    return (((ki.info || ki).selections || {}).user || []).includes("log");
+  } catch (e) { return false }
+}
+
+async function gymEnergy(key, since, upto){
+  let total = 0, newest = since, cursor = upto, pages = 0;
+  const seen = new Set();
+  while (pages++ < 4) {
+    let j;
+    try {
+      const r = await fetch("https://api.torn.com/user/?selections=log&log=5300,5301,5302,5303,5310"
+        + "&from=" + since + "&to=" + cursor + "&key=" + encodeURIComponent(key) + "&comment=CKClubhouse");
+      j = await r.json();
+    } catch (e) { return null }
+    if (!j || j.error) return null;
+    const rows = Object.entries(j.log || {});
+    if (!rows.length) break;
+    let oldest = Infinity;
+    for (const [lid, e] of rows) {
+      oldest = Math.min(oldest, e.timestamp);
+      if (seen.has(lid)) continue;
+      seen.add(lid);
+      if (e.category !== "Gym") continue;                  // in case the type filter is ignored
+      if (e.timestamp <= since || e.timestamp > upto) continue;
+      total += (e.data && e.data.energy_used) || 0;
+      if (e.timestamp > newest) newest = e.timestamp;
+    }
+    if (rows.length < 100 || oldest <= since) break;
+    cursor = oldest - 1;
+  }
+  return { energy: total, newest };
+}
+
 // One category per call — Torn rejects "cat=drugs,items,other". battle_stats is
 // five fields, cat=all is 217, and we already tripped Torn's daily record limit
 // once, so the stats are read often and the consumables rarely.
@@ -537,6 +590,7 @@ function applyReading(u, t, r, maxE){
   // adopt today's stats as its baseline, inflating the denominator and dragging
   // the adjusted score BELOW the raw one. fs is written at birth, and nowhere else.
   if (r.stats) u.ls = r.stats;
+  if (r.gymAdd != null) { u.gymE = (u.gymE || 0) + r.gymAdd; u.gymCur = r.gymCur }
   if (r.cons) {
     // each counter gets its own guard. Sharing one meant that adding a counter
     // later left its baseline unset, and its "delta" was the lifetime total.
@@ -664,15 +718,24 @@ async function tickTraining(env, t, atWar) {
   for (const id of ids) {
     try {
       if (keys[id].maxE == null) { keys[id].maxE = await maxEnergy(keys[id].key); keysChanged = true }
+      if (keys[id].log == null) { keys[id].log = await hasLog(keys[id].key); keysChanged = true }
       const r = await readMember(keys[id].key, wantCons.has(id));
       if (r._error) continue;                      // a dead key must not stop the rest
       reads[id] = r;
+      if (keys[id].log && wantCons.has(id)) r.gymKey = keys[id].key;
       doc.readers[id] = doc.readers[id] || { fullAt: 0 };
       if (r.cons) doc.readers[id].fullAt = t;
     } catch (e) { /* skip and try again next time */ }
   }
 
+  // gym energy is per event, because each event has its own window
   for (const ev of active) {
+    for (const [id, r] of Object.entries(reads)) {
+      if (!r.gymKey) continue;
+      const u0 = ev.users[id];
+      const got = await gymEnergy(r.gymKey, (u0 && u0.gymCur) || ev.from, Math.min(ev.to, t));
+      if (got) { r.gymAdd = got.energy; r.gymCur = got.newest }
+    }
     for (const [id, r] of Object.entries(reads)) {
       let u = ev.users[id];
       if (!u) u = ev.users[id] = { name: keys[id].name, first: r.total, firstAt: t, s: [],
