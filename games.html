@@ -114,6 +114,9 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 .ev>summary{font-weight:600; padding:9px 0}
 .ev>summary>span{font-weight:400}
 .medals{letter-spacing:1px}
+.pills{display:inline-flex; align-items:center; gap:1px; flex-wrap:nowrap; justify-content:flex-end}
+.pills img{width:18px; height:18px; filter:drop-shadow(0 1px 1px rgba(0,0,0,.55)) brightness(1.15)}
+.pills b{font-size:12px; color:var(--dim); margin-right:3px}
 .jump{display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px; font-size:12px; font-weight:700;
   background:#3A2F14; color:var(--amber); border:1px solid #5A4A1E; vertical-align:middle}
 .linkish{background:none; border:0; padding:4px 0 0; color:var(--dim); font-size:13px; text-decoration:underline; cursor:pointer; width:auto}
@@ -135,7 +138,9 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 
 <section id="setup" class="card">
   <h2>Join in</h2>
-  <p class="hint" style="margin-top:0">No account, no sign-up. Make a key, paste it in, and you are on the board.</p>
+  <p class="hint" style="margin-top:0">No account, no sign-up. Make a key, paste it in, and you are on the board.
+    <br><b>Sharing your gym log means you are scored from the moment an event opens</b> — however late you join, and
+    with the energy you actually spent shown beside your gains. Without it, only what you do after signing up counts.</p>
   <div class="row" style="margin-top:11px">
     <a class="btn primary" href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,battlestats,personalstats,gym,refills,log" target="_blank" rel="noopener">1 &nbsp;Make my key &rsaquo;</a>
     <span class="meta">one click — Torn makes it for you</span>
@@ -239,7 +244,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-09 14:58";
+const BUILD = "2026-10-09 15:20";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -425,6 +430,15 @@ function renderHist(hist){
 }
 
 const num = v => (v==null? "—" : v===0? "0" : v.toLocaleString());
+// one pill per xanax, because a number is just a number
+const XAN = "https://www.torn.com/images/items/206/large.png";
+const pills = n => { n = n||0;
+  if(!n) return `<span class="meta">&mdash;</span>`;
+  const show = Math.min(n, 10);
+  return `<span class="pills" title="${n} xanax">`
+    + (n>show? `<b>&times;${n}</b>` : "")
+    + `<img src="${XAN}" alt="xanax" loading="lazy">`.repeat(show) + `</span>`;
+};
 const fmtClock = t => new Date(t*1000).toISOString().slice(11,16) + " TCT";
 let curEv = null;                       // which event's board is showing
 function render(data){
@@ -478,7 +492,7 @@ function render(data){
       + (r.adj>0? `<span class="barfill" style="width:${(100*r.adj/lead).toFixed(1)}%"></span>` : "")
       + `<span class="barval">${r.adj>0? "+"+r.adj.toFixed(2)+"%" : "—"}</span></td>`
       + `<td class="meta">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
-      + `<td class="meta">${num(r.xan)}</td><td class="meta">${num(r.own)}</td><td class="meta">${num(r.refills)}</td>`
+      + `<td>${pills(r.xan)}</td><td>${pills(r.own)}</td><td class="meta">${num(r.refills)}</td>`
       + `<td class="meta">${num(r.cans)}</td>`
       + `<td class="meta">${r.gymE==null? "&mdash;" : r.gymE.toLocaleString()}</td>`
       + `<td class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late" : "from the start"}</td></tr>`;
