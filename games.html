@@ -267,7 +267,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-09 16:50";
+const BUILD = "2026-10-09 16:51";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -616,7 +616,17 @@ $("connect").onclick = async ()=>{
     const d = await board({hist:1});
     render(d);
     await autoEnrol(true);          // always re-register: the key may have changed
-    if((d.events||[]).some(e=>e.open)) await recordNow();   // catch a baseline straight away
+    // Do not take our own word for it — ask the server whether it actually stuck.
+    const check = await board({hist:1});
+    render(check);
+    if(!check.enrolled){
+      showErr("Your key was read fine, but the tracker has not stored it. Press Connect again in a moment —"
+        + " and if it keeps failing, tell leadership rather than assuming you are in.");
+    } else {
+      $("status").textContent = "connected — you are signed up";
+      setTimeout(()=>{ if($("status").textContent === "connected — you are signed up") $("status").textContent = "" }, 8000);
+    }
+    if((check.events||[]).some(e=>e.open)) await recordNow();   // catch a baseline straight away
   }catch(e){ showErr(e.message) }
   finally{ $("connect").disabled = false }
 };
