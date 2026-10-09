@@ -170,7 +170,7 @@ export default {
         return {
           id: +uid, name: u.name,
           gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
-          adj: scoreOf(u, g), exact: !!u.fs, split: !!u.ls,
+          adj: scoreOf(u, g), exact: !!u.fs, split: !!u.ls, burst: burstOf(u),
           xan: xanFor(doc, ev, uid, now),
           own: Math.max(0, (u.xan || 0) - (u.firstX || 0)),
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
@@ -389,35 +389,38 @@ async function archiveEvent(env, doc, ev){
    stats scores the same at every P and everyone else rotates around them. */
 const CAP = 50000000;          // per stat
 const TAIL = 0.03;             // what a point of stat ABOVE the cap is worth against one below
-const FLOOR = 19875;           // see below — measured, not guessed
+const FLOOR = 2000;            // see below — measured, not guessed
 const PEXP = 1;                // a tilt on top of the above; 1 = none
 const REF = 4 * (CAP + FLOOR); // the scale anchor: a player capped on all four
 
-/* FLOOR is measured, from ten gym trainings members posted in faction chat,
-   covering six gyms and stats from 1,800 to 6.2 million:
+/* FLOOR is measured from 1,654 of spill_298's own gym trainings — his whole
+   history, 18 gyms, stats from 24 to 6.2 million.
 
-     stat     1,809  Global Gym   74.63% gain per 1000 energy
-     stat     4,317  Core         20.14%
-     stat     4,534  Core         19.81%
-     stat     4,843  Core         20.85%
-     stat     7,803  Global Gym   18.11%
-     stat   120,898  Deep Burn     5.93%
-     stat   409,449  Gun Shop      4.99%
-     stat   410,390  Gun Shop      5.20%
-     stat 2,860,374  Cha Cha's     4.71%
-     stat 6,207,273  Cha Cha's     4.81%
+   Fitting  gain per 1000 energy = B x (stat + FLOOR) / stat  x gymFactor
+   lands on B = 4.54% and FLOOR = 2,000, with a median relative error of 2.3%
+   across the 1,200 normal trainings above 800 stat. Every size band agrees on
+   its own: 993 stat implies 1,742, 62k implies 1,200, 277k implies 1,612.
 
-   The headline: from 120k to 6.2M — a 51x range — it is FLAT at about 4.8%.
-   Percentage gain stops depending on size almost entirely above ~100k a stat,
-   so for anyone that size raw percentage was already a fair measure and no
-   correction is wanted. Everything happens below it, and an additive constant
-   fits that: treat each stat as (stat + 19,875) and the 16x spread across all
-   ten collapses to 1.7x. A power exponent cannot make that shape, which is why
-   PEXP is 1 and this constant does the work.
+   The earlier figure of 19,875 was wrong, and wrong for an interesting reason.
+   It came from ten trainings members posted in chat, and the one that drove it
+   — a 1,809-stat player returning 74.63% per 1000 energy — was a happy jump,
+   not a size effect. A normal training at that size returns about 12.5%. Fit a
+   size curve through a happy jump and you conclude small players are five times
+   more efficient than they are.
 
-   The 1.7x that remains is gym quality, not size — Core comes out low and
-   Global Gym high at the same stat level. Worth noting Global Gym costs 5
-   energy a train where the other five cost 10. */
+   What the clean data actually says: the size advantage is real but small and
+   gone by about 40k a stat. 993 stat gets 12.5% per 1000 energy, 25k gets 5.1%,
+   62k gets 4.6%, and from there to 6.2 million it sits at 4.56%. So for anyone
+   above ~40k a stat, raw percentage gain was already fair.
+
+   Gym makes little difference per unit of energy: across all 18, the factors
+   span 0.83 (Deep Burn) to 1.42 (Global Gym), and the gyms our members use sit
+   within about 20% of each other. Not worth modelling.
+
+   Happy jumps are a different matter entirely, and they are what the earlier
+   fits kept mistaking for size. 287 of these trainings returned more than twice
+   the baseline, median 2.8x and up to 38.8x. That is why the board shows a
+   burst column rather than trying to price jumps into the score. */
 
 // A hard cap says stat above 50M counts for nothing, which flatters a very big
 // player enormously: 5.5B of stats would be priced at 200M. Torn dampens gains
@@ -429,6 +432,25 @@ function denomOf(u){
   if (u.fs) return capped(u.fs.s || 0) + capped(u.fs.d || 0) + capped(u.fs.p || 0) + capped(u.fs.x || 0);
   return Math.min(u.first || 0, REF) + 4 * FLOOR;   // no per-stat baseline on file: the fallback
 }
+/* Happy jumps are allowed, so the score ignores them — but a weekend decided
+   in two minutes should at least be visible. This is the largest gain between
+   two consecutive readings, as a share of everything they gained. A big share
+   over a long gap is just sparse sampling; a big share over a few minutes is a
+   jump, which is why the span goes out with it. */
+function burstOf(u){
+  const ser = u.s || [];
+  if (ser.length < 2 || !(u.first > 0)) return null;
+  const total = (u.last || 0) - (u.first || 0);
+  if (total <= 0) return null;
+  let best = 0, at = 0, span = 0;
+  for (let i = 0; i < ser.length - 1; i++) {
+    const d = ser[i + 1][1] - ser[i][1];
+    if (d > best) { best = d; at = ser[i + 1][0]; span = ser[i + 1][0] - ser[i][0] }
+  }
+  if (best <= 0) return null;
+  return { share: +(best / total).toFixed(3), at, span };
+}
+
 function scoreOf(u, gain){
   const d = denomOf(u);
   if (d <= 0) return 0;
