@@ -170,7 +170,7 @@ export default {
         return {
           id: +uid, name: u.name,
           gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
-          adj: scoreOf(u, g), exact: !!u.fs, split: !!u.ls, burst: burstOf(u),
+          adj: scoreOf(u, g), exact: !!u.fs, split: !!u.ls, jump: jumpOf(doc, ev, uid, u, now),
           xan: xanFor(doc, ev, uid, now),
           own: Math.max(0, (u.xan || 0) - (u.firstX || 0)),
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
@@ -432,23 +432,40 @@ function denomOf(u){
   if (u.fs) return capped(u.fs.s || 0) + capped(u.fs.d || 0) + capped(u.fs.p || 0) + capped(u.fs.x || 0);
   return Math.min(u.first || 0, REF) + 4 * FLOOR;   // no per-stat baseline on file: the fallback
 }
-/* Happy jumps are allowed, so the score ignores them — but a weekend decided
-   in two minutes should at least be visible. This is the largest gain between
-   two consecutive readings, as a share of everything they gained. A big share
-   over a long gap is just sparse sampling; a big share over a few minutes is a
-   jump, which is why the span goes out with it. */
-function burstOf(u){
-  const ser = u.s || [];
-  if (ser.length < 2 || !(u.first > 0)) return null;
-  const total = (u.last || 0) - (u.first || 0);
-  if (total <= 0) return null;
-  let best = 0, at = 0, span = 0;
-  for (let i = 0; i < ser.length - 1; i++) {
-    const d = ser[i + 1][1] - ser[i][1];
-    if (d > best) { best = d; at = ser[i + 1][0]; span = ser[i + 1][0] - ser[i][0] }
-  }
-  if (best <= 0) return null;
-  return { share: +(best / total).toFixed(3), at, span };
+/* Happy jumps are allowed, so the score ignores them — but they are worth
+   seeing. A jump is not a big gain, it is a big gain FOR THE ENERGY SPENT, so
+   the test is to price the gain in energy at normal efficiency and compare it
+   against the energy they could plausibly have had.
+
+   An earlier version flagged the largest gain between two readings instead.
+   That measures how much someone trained in one sitting, not how well: three
+   xanax back to back looks identical to a jump. This does not depend on
+   catching the moment at all, which also means it still works across a gap in
+   the sampling.
+
+   The energy estimate is deliberately generous. Over-stating what someone had
+   available can only hide a jump; it can never invent one. */
+const BASE = 4.54;             // % gain per 1000 energy, measured (see FLOOR)
+const JUMP_AT = 2;             // below this it is ordinary training
+
+function jumpOf(doc, ev, uid, u, now){
+  if (!(u.first > 0)) return null;
+  const gain = (u.last || 0) - (u.first || 0);
+  if (gain <= 0) return null;
+  const perEnergy = (BASE / 100000) * (u.first / 4 + FLOOR);   // stat points per energy
+  if (perEnergy <= 0) return null;
+  const implied = gain / perEnergy;
+  const secs = Math.max(0, Math.min(ev.to, now) - (u.firstAt || ev.from));
+  const xan = xanFor(doc, ev, uid, now) + Math.max(0, (u.xan || 0) - (u.firstX || 0));
+  const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
+  const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
+  const available = secs / 180                 // natural regen, 5 every 15 min
+                  + xan * 250                  // xanax, faction and personal
+                  + ref * (u.maxE || 150)      // a refill is a full bar
+                  + drk * 50;                  // energy cans, pitched high
+  if (available <= 0) return null;
+  const x = implied / available;
+  return x >= JUMP_AT ? +x.toFixed(1) : null;
 }
 
 function scoreOf(u, gain){
