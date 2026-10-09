@@ -137,23 +137,23 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <h2>Join in</h2>
   <p class="hint" style="margin-top:0">No account, no sign-up. Make a key, paste it in, and you are on the board.</p>
   <div class="row" style="margin-top:11px">
-    <a class="btn primary" href="https://www.torn.com/preferences.php#tab=api" target="_blank" rel="noopener">1 &nbsp;Make my key &rsaquo;</a>
-    <span class="meta">opens your Torn API settings</span>
+    <a class="btn primary" href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,battlestats,personalstats,gym,refills,log" target="_blank" rel="noopener">1 &nbsp;Make my key &rsaquo;</a>
+    <span class="meta">one click — Torn makes it for you</span>
   </div>
   <div class="row" style="margin-top:11px">
     <span class="step">2</span>
     <input id="key" type="password" placeholder="Paste your Torn API key" autocomplete="off" spellcheck="false" style="flex:1; min-width:180px; font-family:ui-monospace,monospace">
     <button class="primary" id="connect">Connect</button>
   </div>
-  <p class="hint">The button opens your Torn API settings. Press <b>+ Create New Key</b>, name it anything, and tick
-    these seven under <b>user</b> — nothing else:
-    <br><b>basic &middot; bars &middot; battlestats &middot; personalstats &middot; gym &middot; refills &middot; log</b>
-    <br>Then copy the key it makes and paste it above. That is a <b>read-only custom</b> key: it grants only those seven, so unlike
+  <p class="hint">The button asks Torn to make the key for you — it will show you exactly what it covers before you
+    accept, then hand you the key to paste above. It is a <b>read-only custom</b> key granting seven things and nothing
+    else: <b>basic, bars, battlestats, personalstats, gym, refills</b> and your <b>gym log</b>. So unlike
     a plain Limited key <b>it cannot read your mail, your events or your trades</b>. You make it yourself, it is stored
     only in this browser, and it is only ever sent to api.torn.com — nobody here can read your battle stats but you,
     which is why you record your own.
-    <br><br>Don't want to share the gym log? Leave <b>log</b> unticked — everything else still works, you just get a
-    &ldquo;&mdash;&rdquo; in the energy columns.</p>
+    <br><br>Don't want to share your gym log?
+    <a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Torn%20Clubhouse&user=basic,bars,battlestats,personalstats,gym,refills" target="_blank" rel="noopener">Make one without it &rsaquo;</a>
+    — everything else still works, you just get a &ldquo;&mdash;&rdquo; in the energy columns.</p>
 </section>
 
 <section id="main" class="card" hidden>
@@ -238,7 +238,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-09 14:45";
+const BUILD = "2026-10-09 14:49";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
