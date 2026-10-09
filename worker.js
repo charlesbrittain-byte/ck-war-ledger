@@ -619,6 +619,15 @@ async function tickArmoury(env, doc, t, earliest){
 const LOG_STATS = { 5300: "strength", 5301: "defense", 5302: "speed", 5303: "dexterity" };
 const STAT_KEY = { strength: "s", defense: "d", speed: "p", dexterity: "x" };
 
+// Whether a key can read logs. Stored at sign-up, and filled in on the next
+// poll for anyone who enrolled before this existed.
+async function hasLog(key){
+  try {
+    const ki = await (await fetch("https://api.torn.com/v2/key/info?key=" + encodeURIComponent(key))).json();
+    return (((ki.info || ki).selections || {}).user || []).includes("log");
+  } catch (e) { return false }
+}
+
 async function gymSessions(key, since, upto){
   const out = [];
   let cursor = upto, pages = 0;
