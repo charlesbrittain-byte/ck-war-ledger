@@ -137,17 +137,18 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <h2>Join in</h2>
   <p class="hint" style="margin-top:0">No account, no sign-up. Make a key, paste it in, and you are on the board.</p>
   <div class="row" style="margin-top:11px">
-    <a class="btn primary" href="https://www.torn.com/api.html#builder" target="_blank" rel="noopener">1 &nbsp;Make my key &rsaquo;</a>
-    <span class="meta">opens Torn's own key builder</span>
+    <a class="btn primary" href="https://www.torn.com/preferences.php#tab=api" target="_blank" rel="noopener">1 &nbsp;Make my key &rsaquo;</a>
+    <span class="meta">opens your Torn API settings</span>
   </div>
   <div class="row" style="margin-top:11px">
     <span class="step">2</span>
     <input id="key" type="password" placeholder="Paste your Torn API key" autocomplete="off" spellcheck="false" style="flex:1; min-width:180px; font-family:ui-monospace,monospace">
     <button class="primary" id="connect">Connect</button>
   </div>
-  <p class="hint">The button opens Torn's own key builder. Under <b>user</b>, tick these seven and nothing else:
+  <p class="hint">The button opens your Torn API settings. Press <b>+ Create New Key</b>, name it anything, and tick
+    these seven under <b>user</b> — nothing else:
     <br><b>basic &middot; bars &middot; battlestats &middot; personalstats &middot; gym &middot; refills &middot; log</b>
-    <br>then use the link it gives you. That makes a <b>read-only custom</b> key: it grants only those seven, so unlike
+    <br>Then copy the key it makes and paste it above. That is a <b>read-only custom</b> key: it grants only those seven, so unlike
     a plain Limited key <b>it cannot read your mail, your events or your trades</b>. You make it yourself, it is stored
     only in this browser, and it is only ever sent to api.torn.com — nobody here can read your battle stats but you,
     which is why you record your own.
@@ -237,7 +238,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-09 14:39";
+const BUILD = "2026-10-09 14:45";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
