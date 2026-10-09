@@ -1,0 +1,13 @@
+# The leaders' page is served as a static asset by its own worker, separate from
+# the API worker in wrangler.toml. It had drifted badly out of date because
+# nothing published to it: index.html was only being pushed to GitHub Pages,
+# which is NOT the URL the leaders' page is opened at.
+#
+# Deploy it with ./deploy-admin.sh, never with a bare `wrangler deploy` from the
+# repo root — the assets directory is published wholesale, and the root holds
+# worker.js and TRACKER_TOKEN.txt.
+name = "tornclubhouse"
+compatibility_date = "2026-09-20"
+
+[assets]
+directory = "./dist"
