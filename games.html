@@ -222,7 +222,8 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     per-stat recording only began part way through, so your four stats as they are now have been wound back to the
     total you started on. Only the total matters to the score, so this is close for everyone. Events from here on
     record the real split from the first second.</p>
-  <p class="hint">Ranking is on <b>Adjusted %</b>. Raw % gain is a poor measure at the top end, because gym gains
+  <p class="hint">Ranking is on <b>Share</b>, which is just <b>Adjusted %</b> rescaled, so the order is the same.
+    Raw % gain is a poor measure at the top end, because gym gains
     stop keeping pace with your stats: through the ordinary range the gain a given energy buys rises almost in step
     with your stats, so raw % is close to fair there, but past about 45&nbsp;million total it falls off a cliff and
     being big turns into a straight penalty. Adjusted divides your gain by a curve with that shape, so the score comes
@@ -606,7 +607,7 @@ function render(data){
   $("board").innerHTML = rows.length ? rows.map((r,i)=>{
     const mine = me && r.id === me.id;
     return `<tr class="${mine?"me":""}">`
-      + `<td class="rank">${i<3? `<span class="medal">${medals[i]}</span>` : (i+1)}</td>`
+      + `<td class="rank">${(i<3 && !ev.held)? `<span class="medal">${medals[i]}</span>` : (i+1)}</td>`
       + `<td>${esc(r.name||("["+r.id+"]"))}${mine? ' <span class="meta">you</span>':""}`
       + (r.jump? `<span class="jump" title="Gained about ${r.jump} times more than the energy they used can normally buy — the signature of a happy jump. It does not affect the score.">&#9889;${r.jump}&times;</span>` : "")
       + `</td>`
