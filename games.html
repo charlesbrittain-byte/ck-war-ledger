@@ -182,6 +182,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <div class="headline" id="headline"></div>
   <div class="when" id="when"></div>
   <div class="prizes" id="prizes" hidden></div>
+  <div class="note" id="standby" hidden></div>
   <div class="row" style="margin-top:11px">
     <span class="meta" id="updated"></span>
     <button id="refresh" class="linkish">Refresh now</button>
@@ -262,7 +263,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-09 16:23";
+const BUILD = "2026-10-09 16:39";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -481,6 +482,22 @@ function render(data){
   else if(now < ev.from){ w.innerHTML = `<b>${fmtWhen(ev.from)}</b> to <b>${fmtWhen(ev.to)}</b> · opens in ${fmtLeft(ev.from-now)}`; }
   else if(now > ev.to){ w.innerHTML = `<b>${fmtWhen(ev.from)}</b> to <b>${fmtWhen(ev.to)}</b> · finished`; }
   else { w.innerHTML = `<b>${fmtWhen(ev.from)}</b> to <b>${fmtWhen(ev.to)}</b> · ${fmtLeft(ev.to-now)} left`; }
+
+  // Signing up between events is the normal way in, so say so plainly rather
+  // than leaving someone looking at a finished board wondering if it worked.
+  const anyOpen = evs.some(e => e.open);
+  const upcoming = evs.find(e => now < e.from);
+  const sb = $("standby");
+  if (anyOpen || !ev.from) { sb.hidden = true; }
+  else {
+    sb.hidden = false;
+    sb.innerHTML = (upcoming
+        ? `<b>Nothing running yet</b> — the next one opens ${fmtWhen(upcoming.from)}.`
+        : `<b>Nothing running at the moment.</b> The board below is the last one.`)
+      + (data.enrolled                      // the module-level flag is set later in this function
+        ? ` You are signed up: your starting point is taken automatically the moment the next event opens, so there is nothing to come back and do.`
+        : ` Connect your key and you are in the next one.`);
+  }
 
   // prizes, only the places leadership actually filled in
   const pz = ev.prizes || {};
