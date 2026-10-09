@@ -247,6 +247,10 @@ export default {
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
           cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
           gymE: u.gymE != null ? u.gymE : null, fromLog: !!u.fromLog,
+          // the audit column: gain per energy against par for their size. Only
+          // meaningful where the energy is measured rather than estimated.
+          vsPar: (u.gymE > 0 && u.first > 0 && g > 0)
+                 ? +((g / u.gymE) / parOf(u.first)).toFixed(2) : null,
           since: u.firstAt, updated: u.lastAt,
           lateBy: u.fromLog ? 0 : Math.max(0, u.firstAt - ev.from),
           series: ser
@@ -275,7 +279,8 @@ export default {
                       board: boardFor(ev), keyTest: isAdmin ? (ev.keyTest || null) : null }));
       const first = events.find(e => e.open) || events[events.length - 1] || null;
       return json({ events, now, you: id || null, enrolled: enrolledMe, history,
-                    scoring: { knee: KNEE, aLo: A_LO, aHi: A_HI, tilt: TILT, ref: REF, floor: FLOOR },
+                    scoring: { knee: KNEE, aLo: A_LO, aHi: A_HI, tilt: TILT, ref: REF, floor: FLOOR,
+                               parAt: PAR_AT, parT: PAR_T },
                     // what a page written before multiple events understands
                     event: first ? { from: first.from, to: first.to, name: first.name } : {},
                     open: !!(first && first.open), board: first ? first.board : [],
@@ -532,10 +537,32 @@ async function archiveEvent(env, doc, ev){
    about 45M total it falls off a cliff, and that is where big players get hurt.
    One exponent cannot describe both, so there are two, meeting at the knee.
 
-   A_HI is the number to be careful with, and it checks out independently: at
-   0.40 the curve implies a par of 3,002 stat points per energy at Top's size
-   against the 3,190 his own 6,395 sessions actually show — 6% out, on data that
-   was not used to set it. 0.35 and 0.44 are both 15-26% out.
+   A_HI is the number to be careful with. It is set so the curve passes through
+   the measured median of the top bin, and it then agrees with all three bins
+   above the knee to within 0.8% — 12.1M, 44.8M and 4.12bn — on two points it was
+   not fitted to. An earlier version of this used 0.40, which came from comparing
+   the curve at Top's event baseline of 5.48bn against a median measured at
+   4.12bn. Different sizes; the comparison was worthless and it left the top of
+   the curve 16% low. Always compare the curve to a measurement at the SAME total.
+
+   What the score comes out as, exactly:
+
+       score  =  100 x energy x (how well it was used, vs par for your size) x tilt
+
+   which is worth keeping in mind when a result looks surprising. Someone can put
+   in more energy and still finish behind, because the middle term is doing real
+   work. Of the three with measured energy that first weekend: spill_298 2,810
+   energy at 1.70x par, Mr_jeff14574 2,940 at 1.28x, Top 2,610 at 0.87x.
+
+   Which knob to turn, if it ever looks off:
+   - TILT is the only one that is a PREFERENCE. Raise it to handicap big players
+     harder, drop it to ease off, set it to 0 for dead level. Across this faction's
+     range, 141k to 5.5bn, each 0.01 of TILT is about an 11% swing end to end.
+   - KNEE, A_LO and A_HI are MEASUREMENTS, not preferences. Do not move them to
+     change a placing; move them only when a new gym log says the curve is wrong.
+     The signal for that is the vsPar column: it should scatter around 1.0 with no
+     relation to size. If big members sit consistently below 1.0 and small ones
+     above, the curve is wrong and these are what to change.
 
    TILT is the deliberate thumb on the scale. With it, five members from 141k to
    5.5bn all training at exactly their own par score within 1.23x of each other,
@@ -563,7 +590,7 @@ async function archiveEvent(env, doc, ev){
      Mr_jeff14574 at 1.30x and Top at 1.05x. */
 const KNEE  = 45000000;     // total of the four stats, where the curve breaks
 const A_LO  = 0.95;         // measured slope below the knee
-const A_HI  = 0.40;         // measured slope above it
+const A_HI  = 0.4387;       // measured slope above it
 const REF   = 10000000;     // scale anchor only; moving it moves every score alike
 const TILT  = 0.02;         // the deliberate tilt against big players
 const FLOOR = 20000;        // damps the very bottom, below the measured range

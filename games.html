@@ -50,6 +50,7 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .rank{color:var(--faint); width:2.2em}
 .gain{font-weight:700; font-size:17px}
 .pos{color:var(--up)} .zero{color:var(--faint)}
+.neg{color:var(--down,#c0675f)}
 .medal{font-size:17px}
 .tblwrap{overflow-x:auto; margin-top:4px}
 .chart{width:100%; height:190px; display:block; margin-top:12px}
@@ -212,7 +213,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   <div class="legend" id="legend"></div>
   <div class="tblwrap">
     <table>
-      <thead><tr><th class="rank">#</th><th>Member</th><th>Adjusted</th><th>Raw</th><th>Xanax</th><th>Refills</th><th>Cans</th><th>Gym E</th><th>Started</th></tr></thead>
+      <thead><tr><th class="rank">#</th><th>Member</th><th>Adjusted</th><th>Raw</th><th>Xanax</th><th>Refills</th><th>Cans</th><th>Gym E</th><th>vs par</th><th>Started</th></tr></thead>
       <tbody id="board"></tbody>
     </table>
   </div>
@@ -238,7 +239,10 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     <br><br><b>Xanax</b> is every xanax you took during the event, one pill per xanax. If you share your gym log it is
     counted from there, which catches the lot — yours and the faction's. Otherwise it falls back to the faction
     armoury log, which only sees what the faction handed out, so any you bought yourself will be missing.
-    <b>Refills</b> and <b>Cans</b> come from your own stats too. <b>Gym E</b> is the energy you actually spent
+    <b>vs par</b> is how much your gain beat what ordinary training buys at your size &mdash; &times;1.00 is a normal
+    session, above that means you got more out of the same energy. It needs your gym log, so it is blank without one,
+    and it is shown for interest: the score already accounts for it.
+    <br><br><b>Refills</b> and <b>Cans</b> come from your own stats too. <b>Gym E</b> is the energy you actually spent
     training, read straight from your Torn log — it only appears if your key shares the log, and shows
     &ldquo;&mdash;&rdquo; otherwise. None of them affect the score; they are there so you can see who put the effort in.</p>
   <p class="hint" id="smallprint">There is nothing to press. Connect your key once — before the event if you like —
@@ -591,8 +595,10 @@ function render(data){
       + `<td>${pills(r.xan)}</td><td class="meta">${num(r.refills)}</td>`
       + `<td class="meta">${num(r.cans)}</td>`
       + `<td class="meta">${r.gymE==null? "&mdash;" : r.gymE.toLocaleString()}</td>`
+      + `<td class="${r.vsPar==null? "meta" : r.vsPar>=1? "pos":"neg"}" title="gain per energy against what ordinary training buys at your size">`
+      + `${r.vsPar==null? "&mdash;" : "&times;"+r.vsPar.toFixed(2)}</td>`
       + `<td class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late" : "from the start"}</td></tr>`;
-  }).join("") : `<tr><td colspan="9" class="meta">Nobody has recorded yet — be first.</td></tr>`;
+  }).join("") : `<tr><td colspan="10" class="meta">Nobody has recorded yet — be first.</td></tr>`;
   $("estNote").hidden = !rows.some(r=>r.exact===false);
   if(typeof data.enrolled === "boolean"){
     enrolled = data.enrolled;
