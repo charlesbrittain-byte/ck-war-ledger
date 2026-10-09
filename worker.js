@@ -175,8 +175,7 @@ export default {
           id: +uid, name: u.name,
           gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
           adj: scoreOf(u, g), exact: !!u.fs, split: !!u.ls, jump: jumpOf(doc, ev, uid, u, now),
-          xan: xanFor(doc, ev, uid, now),
-          own: ownXan(doc, ev, uid, u, now),
+          xan: xanTaken(doc, ev, uid, u, now), xanFromLog: u.xanLog != null,
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
           cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
           gymE: u.gymE != null ? u.gymE : null, fromLog: !!u.fromLog,
@@ -242,6 +241,25 @@ export default {
       }
       const doc = await env.LEDGER.get(key, "json");
       return json(doc || { terms: null }, 200, cors);
+    }
+    if (url.pathname.endsWith("/probe38")) {   // TEMPORARY: which log type is "used a xanax"?
+      const k = env.TORN_API_KEY;
+      const t = await (await fetch("https://api.torn.com/torn/?selections=logtypes&key=" + k + "&comment=CKProbe")).json();
+      const T = t.logtypes || t;
+      const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
+      const mine = (keys["309593"] || {}).key;
+      const doc = migrate(await env.LEDGER.get("train", "json"));
+      const ev = doc.events[doc.events.length - 1];
+      let sample = null;
+      if (mine) {
+        const r = await (await fetch("https://api.torn.com/user/?selections=log&cat=62&limit=20"
+          + "&key=" + encodeURIComponent(mine) + "&comment=CKProbe")).json();
+        const rows = Object.values(r.log || {});
+        sample = { count: rows.length, titles: [...new Set(rows.map(e => e.log + " " + e.title))].slice(0, 8),
+                   one: rows[0] || null };
+      }
+      return json({ drugTypes: Object.entries(T).filter(([, v]) => /xanax|drug/i.test(String(v))).slice(0, 15),
+                    logSample: sample }, 200, cors);
     }
     if (url.pathname.endsWith("/status")) {
       const meta = (await env.LEDGER.get("meta", "json")) || { note: "worker has not ticked yet — check the cron trigger" };
@@ -358,17 +376,50 @@ function xanBetween(doc, uid, from, to){
   return n;
 }
 
-/* Torn's drugs.xanax is LIFETIME xanax taken and does not say where each one
-   came from — the faction's are in there too. So "own" is the rise in that
-   counter minus the faction ones over the SAME stretch, and it is only
-   meaningful if the counter's baseline was taken when the event opened.
-   Otherwise we genuinely do not know, and say so rather than guess. */
-function ownXan(doc, ev, uid, u, now){
-  if (u.firstX == null || u.firstXAt == null) return null;
-  if (u.firstXAt > ev.from + 300) return null;          // baseline too late to mean anything
-  const upto = Math.min(ev.to, now);
-  const total = Math.max(0, (u.xan || 0) - u.firstX);
-  return Math.max(0, total - xanBetween(doc, uid, u.firstXAt, upto));
+/* Xanax taken, counted from the log where we have it and from the faction
+   armoury feed where we do not.
+
+   The log is much the better source: exact, windowed to the event, and each
+   entry even carries the faction id when that xanax came out of the armoury —
+   so it needs no baseline and no subtracting one source from another. Torn's
+   drugs.xanax counter can do none of that; it is a lifetime total that never
+   says where anything came from, which is why the old "own" column had to go.
+
+   The armoury feed still covers everyone without a log key, but it only sees
+   what the faction handed out. */
+const XAN_LOG_TYPES = "2290,2291";          // used a xanax / overdosed on one
+
+async function xanaxFromLog(key, since, upto){
+  let n = 0, cursor = upto, pages = 0;
+  const seen = new Set();
+  while (pages++ < 4) {
+    let j;
+    try {
+      const r = await fetch("https://api.torn.com/user/?selections=log&log=" + XAN_LOG_TYPES
+        + "&from=" + since + "&to=" + cursor + "&key=" + encodeURIComponent(key) + "&comment=CKClubhouse");
+      j = await r.json();
+    } catch (e) { return null }
+    if (!j || j.error) return null;
+    const rows = Object.entries(j.log || {});
+    if (!rows.length) break;
+    let oldest = Infinity;
+    for (const [lid, e] of rows) {
+      oldest = Math.min(oldest, e.timestamp);
+      if (seen.has(lid)) continue;
+      seen.add(lid);
+      if (e.log !== 2290 && e.log !== 2291) continue;
+      if (e.timestamp < since || e.timestamp > upto) continue;
+      n++;
+    }
+    if (rows.length < 100 || oldest <= since) break;
+    cursor = oldest - 1;
+  }
+  return n;
+}
+
+function xanTaken(doc, ev, uid, u, now){
+  if (u.xanLog != null) return u.xanLog;
+  return xanFor(doc, ev, uid, now);
 }
 
 function finalBoard(doc, ev){
@@ -378,8 +429,7 @@ function finalBoard(doc, ev){
     return { id: +uid, name: u.name || "",
       gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw, kept for the detail view
       adj: scoreOf(u, g), exact: !!u.fs,
-      xan: xanFor(doc, ev, uid, now),
-      own: ownXan(doc, ev, uid, u, Math.floor(Date.now() / 1000)),
+      xan: xanTaken(doc, ev, uid, u, now),
       refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
       cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)) };
   }).sort((a, b) => b.adj - a.adj).slice(0, HIST_ROWS);
@@ -476,7 +526,7 @@ function jumpOf(doc, ev, uid, u, now){
   if (perEnergy <= 0) return null;
   const implied = gain / perEnergy;
   const secs = Math.max(0, Math.min(ev.to, now) - (u.firstAt || ev.from));
-  const xan = xanFor(doc, ev, uid, now) + (ownXan(doc, ev, uid, u, now) || 0);
+  const xan = xanTaken(doc, ev, uid, u, now);
   const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
   const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
   // measured beats estimated: if their log is readable, that IS the energy
@@ -631,6 +681,7 @@ function applyReading(u, t, r, maxE){
   if (r.stats) u.ls = r.stats;
   // the log is authoritative where we have it: the real baseline, the real
   // curve, the real energy — including for someone who joined after the start
+  if (r.xanLog != null) u.xanLog = r.xanLog;
   if (r.rebuilt) {
     u.first = r.rebuilt.first;
     u.fs = r.rebuilt.fs;
@@ -785,8 +836,11 @@ async function tickTraining(env, t, atWar) {
   for (const ev of active) {
     for (const [id, r] of Object.entries(reads)) {
       if (!r.gymKey) continue;
-      const sess = await gymSessions(r.gymKey, ev.from, Math.min(ev.to, t));
+      const upto = Math.min(ev.to, t);
+      const sess = await gymSessions(r.gymKey, ev.from, upto);
       if (sess) r.rebuilt = fromSessions(sess, r.stats, ev.from);
+      const xl = await xanaxFromLog(r.gymKey, ev.from, upto);
+      if (xl != null) r.xanLog = xl;
     }
     for (const [id, r] of Object.entries(reads)) {
       let u = ev.users[id];
