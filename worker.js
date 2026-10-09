@@ -554,6 +554,25 @@ async function archiveEvent(env, doc, ev){
    work. Of the three with measured energy that first weekend: spill_298 2,810
    energy at 1.70x par, Mr_jeff14574 2,940 at 1.28x, Top 2,610 at 0.87x.
 
+   Deliberately NOT corrected for: which of the four stats someone trains. Torn
+   prices a gym gain off the individual stat, not the total, so training your
+   strongest stat buys more per energy than training your weakest. Measured on
+   the first weekend, by energy-weighted stat trained against a quarter of their
+   total: spill_298 trained a stat 1.41x his average, Mr_jeff14574 0.87x and Top
+   0.85x. Price each man's gain against par for the stat he actually trained and
+   the order changes — Mr_jeff14574 1.35x, spill_298 1.18x, Top 0.93x — where the
+   board, scoring on the total, has them 1.28x, 1.70x and 0.87x.
+
+   That is a decision, not an oversight: picking your best stat is a tactic open
+   to everyone, like picking a good gym, and a competition should reward thinking
+   about it. The members' page says so outright, so it is a known tactic rather
+   than an edge for whoever happens to have read about it.
+
+   The consequence for the audit column below: vsPar carries stat choice in it,
+   so somebody grinding their strongest stat will sit above 1.0 every time and
+   that is CORRECT, not a broken curve. Only a pattern that tracks SIZE means the
+   curve is wrong.
+
    Which knob to turn, if it ever looks off:
    - TILT is the only one that is a PREFERENCE. Raise it to handicap big players
      harder, drop it to ease off, set it to 0 for dead level. Across this faction's
