@@ -389,25 +389,35 @@ async function archiveEvent(env, doc, ev){
    stats scores the same at every P and everyone else rotates around them. */
 const CAP = 50000000;          // per stat
 const TAIL = 0.03;             // what a point of stat ABOVE the cap is worth against one below
-const FLOOR = 14600;           // see below — measured, not guessed
+const FLOOR = 19875;           // see below — measured, not guessed
 const PEXP = 1;                // a tilt on top of the above; 1 = none
 const REF = 4 * (CAP + FLOOR); // the scale anchor: a player capped on all four
 
-/* FLOOR comes from real gym logs members posted — four trainings across a 600x
-   range of stat size and three different gyms:
+/* FLOOR is measured, from ten gym trainings members posted in faction chat,
+   covering six gyms and stats from 1,800 to 6.2 million:
 
-     stat 4,534 in Core        19.81% gain per 1000 energy
-     stat 409,449 in Gun Shop   4.99%
-     stat 410,390 in Gun Shop   5.20%
-     stat 2,860,374 in Cha Cha's 4.71%
+     stat     1,809  Global Gym   74.63% gain per 1000 energy
+     stat     4,317  Core         20.14%
+     stat     4,534  Core         19.81%
+     stat     4,843  Core         20.85%
+     stat     7,803  Global Gym   18.11%
+     stat   120,898  Deep Burn     5.93%
+     stat   409,449  Gun Shop      4.99%
+     stat   410,390  Gun Shop      5.20%
+     stat 2,860,374  Cha Cha's     4.71%
+     stat 6,207,273  Cha Cha's     4.81%
 
-   A smooth curve would have % falling all the way up. It does not: 90x bigger
-   drops it fourfold, then 7x bigger barely moves it. That is an additive
-   constant in Torn's formula, not an exponent. Treat every stat as (stat +
-   FLOOR) and all four line up at 4.7-5.0% per 1000 energy — a 7% spread where
-   a power curve left 4.2x. So above a few hundred thousand per stat, plain
-   percentage gain is already fair, and the whole small-player advantage lives
-   in the bulge below that, which FLOOR cancels. PEXP is therefore 1. */
+   The headline: from 120k to 6.2M — a 51x range — it is FLAT at about 4.8%.
+   Percentage gain stops depending on size almost entirely above ~100k a stat,
+   so for anyone that size raw percentage was already a fair measure and no
+   correction is wanted. Everything happens below it, and an additive constant
+   fits that: treat each stat as (stat + 19,875) and the 16x spread across all
+   ten collapses to 1.7x. A power exponent cannot make that shape, which is why
+   PEXP is 1 and this constant does the work.
+
+   The 1.7x that remains is gym quality, not size — Core comes out low and
+   Global Gym high at the same stat level. Worth noting Global Gym costs 5
+   energy a train where the other five cost 10. */
 
 // A hard cap says stat above 50M counts for nothing, which flatters a very big
 // player enormously: 5.5B of stats would be priced at 200M. Torn dampens gains
