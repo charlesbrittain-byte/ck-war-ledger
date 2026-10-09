@@ -83,6 +83,7 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .tile b{display:block; font-size:21px; line-height:1.15; color:var(--text)}
 .tile span{display:block; font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; margin-top:2px}
 /* the top three as a podium, the way a war page shows a result */
+.held{border:1px solid var(--warn,#b8860b); border-radius:8px; padding:8px 10px; margin:10px 0}
 .podium{display:flex; gap:9px; align-items:flex-end; margin:12px 0 4px}
 .pod{flex:1; text-align:center; border:1px solid var(--line); border-radius:7px; padding:9px 7px 10px;
   background:linear-gradient(180deg,#242931,#1B1F25)}
@@ -192,6 +193,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     <button id="refresh" class="linkish">Refresh now</button>
     <span class="meta" id="status"></span>
   </div>
+  <p class="hint held" id="heldNote" hidden></p>
   <div class="podium" id="podium" hidden></div>
   <div id="error" class="err" hidden></div>
   <div class="note" id="autoBox">
@@ -219,14 +221,17 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     per-stat recording only began part way through, so your four stats as they are now have been wound back to the
     total you started on. Only the total matters to the score, so this is close for everyone. Events from here on
     record the real split from the first second.</p>
-  <p class="hint">Ranking is on <b>Adjusted %</b>. Raw % gain is a poor measure, because gym gains do not keep pace
-    with your stats: per unit of energy they scale as roughly the <i>square root</i> of your total, so the bigger you
-    get the smaller a percentage the same work buys. Adjusted divides your gain by your starting total raised to a
-    fixed power instead, which cancels size out and leaves a measure of the energy you actually put in. That power is
-    measured from real gym logs — 1,438 trainings from members 779&times; apart in size, who happened to train at
-    identical happy. It is a fixed calculation: your score does not depend on who else entered. Bigger players are
-    still given a slightly harder time, on purpose, but only slightly — about 10% over that whole size range, where
-    the old capped scheme cost them 60%.
+  <p class="hint">Ranking is on <b>Adjusted %</b>. Raw % gain is a poor measure at the top end, because gym gains
+    stop keeping pace with your stats: through the ordinary range the gain a given energy buys rises almost in step
+    with your stats, so raw % is close to fair there, but past about 45&nbsp;million total it falls off a cliff and
+    being big turns into a straight penalty. Adjusted divides your gain by a curve with that shape, so the score comes
+    out as a measure of the energy you actually put in rather than of how small you are. The curve is measured from
+    real gym logs &mdash; 11,329 trainings from the members who share theirs, spanning 10 stat to 2 billion. It is a
+    fixed calculation: your score does not depend on who else entered. Bigger players are still given a slightly
+    harder time, on purpose: train at exactly par for your size and everyone from 141k to 5.5bn lands within 1.23&times;
+    of each other, with the biggest at the bottom of that band.
+    <br><br>Anyone under about 50k total stats should treat their score as provisional &mdash; the curve is measured
+    down to roughly that point and no further.
     <br><br>A <b>&#9889; multiplier</b> beside a name means that person gained several times more than the energy
     they got through can normally buy — which is what a happy jump looks like from the outside. It is shown for
     interest and <b>does not change anyone's score</b>; jumps are allowed. Nothing appears for ordinary training.
@@ -559,9 +564,12 @@ function render(data){
     + `<div class="tile"><b>${avg? "+"+avg.toFixed(2)+"%" : "—"}</b><span>average of those moving</span></div>`
     + `<div class="tile"><b>${now>=ev.from&&now<=ev.to? fmtLeft(ev.to-now) : now<ev.from? fmtLeft(ev.from-now) : "over"}</b><span>${now<ev.from?"until it opens":"left to run"}</span></div>`;
 
-  // the podium is a result, so it waits until there is one
-  const over = !!(ev.to && now > ev.to);
+  // the podium is a result, so it waits until there is one — and a leader can
+  // hold it back while a placing is still being settled
+  const over = !!(ev.to && now > ev.to) && !ev.held;
   const top3 = scored.slice(0,3);
+  $("heldNote").hidden = !ev.held;
+  $("heldNote").innerHTML = ev.held ? `<b>Result on hold</b> &mdash; ${esc(ev.held)}` : "";
   $("podium").hidden = !over || top3.length<2;
   $("podium").innerHTML = (!over || top3.length<2) ? "" : top3.map((r,i)=>
       `<div class="pod p${i+1} ${me&&r.id===me.id?"me":""}">`

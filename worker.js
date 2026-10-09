@@ -104,6 +104,19 @@ export default {
          is nothing left to sample — but a log reaches backwards, so somebody who
          connected a log key after the close can still have their real baseline,
          curve and energy recovered. One call per member, on a button. */
+      /* Hold a result back. The scoring curve is only measured down to about
+         2.5M total, so a small member's placing can be provisional until their
+         gym log settles it. Holding shows the board but not a winner. */
+      if (url.searchParams.has("hold") || url.searchParams.has("release")) {
+        if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
+        const ev = evOf(doc, url.searchParams.get("ev"));
+        if (!ev) return json({ error: "no such event" }, 400, cors);
+        if (url.searchParams.has("release")) delete ev.held;
+        else ev.held = (url.searchParams.get("hold") || "").slice(0, 120) || "the result is being checked";
+        await save();
+        return json({ ok: true, held: ev.held || null }, 200, cors);
+      }
+
       if (url.searchParams.has("rebuild")) {
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
@@ -220,9 +233,9 @@ export default {
 
       const boardFor = ev => Object.entries(ev.users || {}).map(([uid, u]) => {
         const g = (u.last || 0) - (u.first || 0);
-        const den = denomOf(u), sc = Math.pow(den, PEXP) * Math.pow(REF, 1 - PEXP);
+        const { d: den, tilt } = denomOf(u);
         // the chart follows the ranking, so it plots the adjusted score
-        const ser = sc > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / sc).toFixed(3)]) : [];
+        const ser = den > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / den * tilt).toFixed(3)]) : [];
         // boards recorded by an older build lost their baseline timestamp from
         // the series, but firstAt still has it — put the anchor back
         if (ser.length && u.firstAt && ser[0][0] > u.firstAt) ser.unshift([u.firstAt, 0]);
@@ -258,10 +271,11 @@ export default {
                       signedUp: ev.roster ? Object.keys(ev.roster).length : null,
                       youIn: ev.roster ? (id ? ev.roster[id] != null : false) : true,
                       open: now >= ev.from && now <= ev.to, locked: !!ev.locked,
+                      held: ev.held || null,
                       board: boardFor(ev), keyTest: isAdmin ? (ev.keyTest || null) : null }));
       const first = events.find(e => e.open) || events[events.length - 1] || null;
       return json({ events, now, you: id || null, enrolled: enrolledMe, history,
-                    scoring: { a: AEXP, p: PEXP, ref: REF, floor: FLOOR },
+                    scoring: { knee: KNEE, aLo: A_LO, aHi: A_HI, tilt: TILT, ref: REF, floor: FLOOR },
                     // what a page written before multiple events understands
                     event: first ? { from: first.from, to: first.to, name: first.name } : {},
                     open: !!(first && first.open), board: first ? first.board : [],
@@ -503,60 +517,71 @@ async function archiveEvent(env, doc, ev){
 }
 
 /* ---------------- scoring ----------------
-   Ranking on plain % gain punishes big players badly, because gym gains do not
-   keep pace with the stat: per unit of energy they scale as roughly the SQUARE
-   ROOT of the stat total, so the percentage you can gain falls away as you grow.
+   Ranking on plain % gain is unfair, but not evenly so, and the shape matters.
+   Measured from 11,329 real gym trainings taken from the logs of the three
+   members who share them — Mr_jeff14574 (3,191 sessions, stat 10 upwards),
+   spill_298 (1,743, stat 24 upwards) and Top (6,395, 428M to 2bn) — pooled and
+   binned by total stats, gain per energy rises like this:
 
-   That exponent is measured, not assumed — see the fit below. Dividing the gain
-   by total^A, where A is that exponent, cancels size out entirely and leaves a
-   pure measure of the energy someone put in. PEXP sits just above A, so a big
-   player has to work slightly harder for the same score, which is deliberate.
+        total stats                      slope of gain/energy
+        360k ->  45M                     0.80 .. 1.09   (call it 0.95)
+         45M -> 4.1bn                    0.44
 
-   REF only anchors the scale: a member whose four stats total REF scores exactly
-   their raw percentage gain, and everyone else rotates around them. Changing it
-   moves every score by the same factor and changes no ranking.
+   So through the ordinary range gain per energy rises almost in step with the
+   stats themselves, which means raw % gain is already close to fair there. Past
+   about 45M total it falls off a cliff, and that is where big players get hurt.
+   One exponent cannot describe both, so there are two, meeting at the knee.
 
-   Measured from 1,438 real gym trainings taken from the logs of two members 779x
-   apart in size — spill_298 at a median 7.26M total and Top at 5.65bn — with
-   identical happy intensity (both a median 0.500 happy per energy, so happy is
-   not driving the difference):
+   A_HI is the number to be careful with, and it checks out independently: at
+   0.40 the curve implies a par of 3,002 stat points per energy at Top's size
+   against the 3,190 his own 6,395 sessions actually show — 6% out, on data that
+   was not used to set it. 0.35 and 0.44 are both 15-26% out.
 
-     median gain per energy    101.0  at 7.26M total
-                             3,118.2  at 5.65bn total
+   TILT is the deliberate thumb on the scale. With it, five members from 141k to
+   5.5bn all training at exactly their own par score within 1.23x of each other,
+   with the biggest at the bottom of that band. Without it they are level.
 
-   Median-to-median that is an exponent of 0.515, and an ordinary least squares
-   fit across all 1,438 sessions individually gives 0.516. Two independent routes
-   to the same number, so A is well pinned down.
+   What this replaced, and a correction worth recording: first a per-stat cap at
+   50M with a 3% tail, then briefly a single exponent of 0.535. The single
+   exponent was fitted before Mr_jeff14574 shared his log, from just two players,
+   and it put a 141k member last on a weekend where he had plainly out-trained
+   everyone for his size. It was also justified partly on the grounds that both
+   players showed an identical 0.500 happy used per energy — which turns out to
+   be a constant of the game, true of all three members at every size, and so no
+   evidence of matched happy at all. The percentile fits below are what actually
+   controls for happy.
 
-   What this replaced: a per-stat cap at 50M with a 3% tail above it, and P=1.
-   At each player's own typical efficiency that scheme paid a 7M member 1.6x what
-   it paid a 5.65bn member for the same energy. At PEXP=0.535 the same comparison
-   is 1.10x — the tilt, and nothing more.
+   The honest limits:
+   - Three players cannot fully separate size from player, because each size band
+     is dominated by one person. The exponent is stable from p10 to p90 of gain
+     per energy (0.655 to 0.616 pooled), which is what makes it believable; the
+     bin-to-bin wiggle is player, not size.
+   - Below about 15k total the slope goes flat and noisy. Nobody is down there
+     yet, and FLOOR damps it. Treat a score under ~50k total as provisional.
+   - A member's own weekend cannot be used to check the curve, because effort and
+     size are mixed in it: spill_298 trained at 1.70x his par that weekend,
+     Mr_jeff14574 at 1.30x and Top at 1.05x. */
+const KNEE  = 45000000;     // total of the four stats, where the curve breaks
+const A_LO  = 0.95;         // measured slope below the knee
+const A_HI  = 0.40;         // measured slope above it
+const REF   = 10000000;     // scale anchor only; moving it moves every score alike
+const TILT  = 0.02;         // the deliberate tilt against big players
+const FLOOR = 20000;        // damps the very bottom, below the measured range
+const PAR_AT = 126.62;      // measured gain per energy ...
+const PAR_T  = 12114816;    // ... at this total, the mid-range anchor
 
-   The honest limit, and it matters: the exponent is measured between about 2.5M
-   and 5.65bn total, and inside that band it is excellent — binned medians sit
-   within 1.00x of the curve right across it. BELOW ~2.5M it is extrapolation and
-   it is probably too harsh. spill_298's own history runs down to 24 stat, and
-   down there he managed a median 0.14 stat per energy where this curve predicts
-   1.80 — but his early years are confounded with bad gyms and no happy routine,
-   so that cannot be read as a pure size effect either. There is a real 5x step
-   in his gain per energy between 1.7M and 2.9M total, which is him changing gym
-   and starting to use happy properly, and no smooth curve fits through it.
-
-   So for anyone under ~2.5M total the score is provisional. FLOOR damps it but
-   does not settle it; at P=0.535 the ordering of a small member is the same at
-   every FLOOR from 0 to 5M. Only a gym log from a genuinely small member will
-   settle it. Every further log-sharer tightens this. */
-const AEXP  = 0.515;        // measured: gain per energy scales as total^AEXP
-const PEXP  = 0.535;        // AEXP plus the deliberate tilt against big players
-const REF   = 10000000;     // scale anchor: a 10M-total member scores their raw %
-const FLOOR = 500000;       // on the TOTAL, where the measured range runs out
-const GFLOOR = 2000;        // the gym curve's own floor, per stat (see jumpOf)
+// The denominator with no tilt: gain divided by this is size-blind.
+function denomNeutral(T){
+  const t = (T || 0) + FLOOR;
+  return KNEE * Math.pow(t / KNEE, t <= KNEE ? A_LO : A_HI);
+}
+// Stat points per energy that ordinary training buys at this size.
+function parOf(T){ return PAR_AT / denomNeutral(PAR_T) * denomNeutral(T) }
 
 function denomOf(u){
   const t = u.fs ? (u.fs.s || 0) + (u.fs.d || 0) + (u.fs.p || 0) + (u.fs.x || 0)
                  : (u.first || 0);
-  return t + FLOOR;
+  return { d: denomNeutral(t), tilt: Math.pow(REF / (t + FLOOR), TILT) };
 }
 
 /* Happy jumps are allowed, so the score ignores them — but they are worth
@@ -572,14 +597,14 @@ function denomOf(u){
 
    The energy estimate is deliberately generous. Over-stating what someone had
    available can only hide a jump; it can never invent one. */
-const GK = 0.029485;           // stat points per energy at a total of 1, measured
+const JUMP_PAR = parOf;        // the same measured curve the score uses
 const JUMP_AT = 2;             // below this it is ordinary training
 
 function jumpOf(doc, ev, uid, u, now){
   if (!(u.first > 0)) return null;
   const gain = (u.last || 0) - (u.first || 0);
   if (gain <= 0) return null;
-  const perEnergy = GK * Math.pow((u.first || 0) + 4 * GFLOOR, AEXP);   // stat points per energy
+  const perEnergy = JUMP_PAR(u.first || 0);   // stat points per energy at their size
   if (perEnergy <= 0) return null;
   const implied = gain / perEnergy;
   const secs = Math.max(0, Math.min(ev.to, now) - (u.firstAt || ev.from));
@@ -598,9 +623,9 @@ function jumpOf(doc, ev, uid, u, now){
 }
 
 function scoreOf(u, gain){
-  const d = denomOf(u);
-  if (d <= 0) return 0;
-  return +(100 * gain / (Math.pow(d, PEXP) * Math.pow(REF, 1 - PEXP))).toFixed(3);
+  const { d, tilt } = denomOf(u);
+  if (!(d > 0)) return 0;
+  return +(100 * gain / d * tilt).toFixed(3);
 }
 
 /* Xanax comes from the faction armoury log rather than each member's own

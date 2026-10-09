@@ -487,6 +487,8 @@ details.settings summary{cursor:pointer}
     <span class="lbl">to</span>
     <input type="datetime-local" id="evTo">
     <button id="evEdit">Save changes</button>
+    <button id="evHold">Hold the result</button>
+    <button id="evRebuild">Pull in late logs</button>
     <button id="evClose">Close it</button>
     <button id="evSave" class="primary">Open another</button>
     <span class="meta" id="evProg"></span>
@@ -2937,6 +2939,41 @@ async function loadEvent(){
   if(!cfg.syncUrl){ $("evMeta").textContent="set the worker URL in Polling & data first"; return }
   try{ renderEvent(await evCall({hist:1})) }catch(e){ $("evMeta").textContent=e.message }
 }
+/* A result can be held back. Scores for anyone under about 2.5M total stats are
+   provisional — the gain curve is only measured above that — so a small
+   member's placing may be waiting on their gym log. Holding shows the board
+   without crowning anyone. */
+$("evHold").onclick=async()=>{
+  if(!evPicked) return;
+  const ev=(evLast&&(evLast.events||[]).find(e=>e.id===evPicked))||null;
+  $("evHold").disabled=true;
+  try{
+    if(ev&&ev.held){ await evCall({release:1, ev:evPicked}); $("evProg").textContent="result released" }
+    else{
+      const why=prompt("Why is the result on hold? Members see this instead of the podium.",
+                       "waiting on a gym log to settle the smaller placings");
+      if(why===null){ $("evHold").disabled=false; return }
+      await evCall({hold:why, ev:evPicked}); $("evProg").textContent="result held";
+    }
+    renderEvent(await evCall({hist:1}));
+  }catch(e){ $("evProg").textContent=e.message }
+  finally{ $("evHold").disabled=false; setTimeout(()=>$("evProg").textContent="",5000) }
+};
+/* The reading pass skips a closed event, but a gym log reaches backwards, so
+   someone who connected a log key after the close can still be recovered. */
+$("evRebuild").onclick=async()=>{
+  if(!evPicked) return;
+  $("evRebuild").disabled=true; $("evProg").textContent="reading logs…";
+  try{
+    const r=await evCall({rebuild:1, ev:evPicked});
+    const did=(r.rebuilt||[]).filter(x=>!x.skipped);
+    $("evProg").textContent = did.length
+      ? did.map(x=>`${x.name}: ${x.energy.toLocaleString()} energy from ${x.sessions} sessions`).join(" · ")
+      : "nothing to pull in — nobody new is sharing a log";
+    renderEvent(await evCall({hist:1}));
+  }catch(e){ $("evProg").textContent=e.message }
+  finally{ $("evRebuild").disabled=false; setTimeout(()=>$("evProg").textContent="",15000) }
+};
 $("evClose").onclick=async()=>{
   if(!evPicked) return;
   if(!confirm("Close this event? Its final scores are banked to the all-time board and it comes off the members' page.")) return;
