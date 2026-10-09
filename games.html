@@ -114,9 +114,14 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 .ev>summary{font-weight:600; padding:9px 0}
 .ev>summary>span{font-weight:400}
 .medals{letter-spacing:1px}
-.pills{display:inline-flex; align-items:center; gap:1px; flex-wrap:nowrap; justify-content:flex-end}
-.pills img{width:18px; height:18px; filter:drop-shadow(0 1px 1px rgba(0,0,0,.55)) brightness(1.15)}
-.pills b{font-size:12px; color:var(--dim); margin-right:3px}
+/* Torn's xanax art is 100x50, so forcing it square squashed it. Each pill gets
+   an upright 10x20 slot with the image turned on its side at its true ratio,
+   and they sit flush to read as one bar. */
+.pills{display:inline-flex; align-items:center; gap:0; flex-wrap:nowrap; justify-content:flex-end}
+.pills i{display:block; width:10px; height:20px; position:relative; flex:none}
+.pills i img{position:absolute; left:50%; top:50%; width:20px; height:10px;
+  transform:translate(-50%,-50%) rotate(90deg); filter:drop-shadow(0 0 1px rgba(0,0,0,.6))}
+.pills b{font-size:12px; color:var(--dim); margin-right:4px}
 .jump{display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px; font-size:12px; font-weight:700;
   background:#3A2F14; color:var(--amber); border:1px solid #5A4A1E; vertical-align:middle}
 .linkish{background:none; border:0; padding:4px 0 0; color:var(--dim); font-size:13px; text-decoration:underline; cursor:pointer; width:auto}
@@ -245,7 +250,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
 <script>
 const WORKER = "https://ck-war-ledger.spill298.workers.dev";
 const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
-const BUILD = "2026-10-09 15:32";
+const BUILD = "2026-10-09 15:37";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
 let me = null, lastData = null, lastHist = null;
@@ -438,7 +443,7 @@ const pills = n => { n = n||0;
   const show = Math.min(n, 10);
   return `<span class="pills" title="${n} xanax">`
     + (n>show? `<b>&times;${n}</b>` : "")
-    + `<img src="${XAN}" alt="xanax" loading="lazy">`.repeat(show) + `</span>`;
+    + `<i><img src="${XAN}" alt="xanax" loading="lazy"></i>`.repeat(show) + `</span>`;
 };
 const fmtClock = t => new Date(t*1000).toISOString().slice(11,16) + " TCT";
 let curEv = null;                       // which event's board is showing
