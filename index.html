@@ -979,7 +979,11 @@ const LS = {
   pts:id=>"twl_pts_"+id, ref:id=>"twl_ref_"+id,
   ha:"twl_homearm", oc:"twl_oc"          // faction-wide caches, not per war
 };
+const DEFAULT_SYNC = "https://ck-war-ledger.spill298.workers.dev";
 let cfg = load(LS.cfg) || {key:"", pAtk:120, pMem:60, medHits:3, medBurst:60, medGap:300};
+// The address of the worker is public and fixed, so there is no reason to make
+// anyone type it. The token is the secret and stays hand-entered.
+if(!cfg.syncUrl){ cfg.syncUrl = DEFAULT_SYNC; save(LS.cfg, cfg) }
 let war = load(LS.war) || null;   // {facId,facName,warId,oppId,oppName,start,end,terms,label,custom}
 let attacks = [];                  // normalised, sorted by t
 let attackIds = new Set();
@@ -2622,7 +2626,10 @@ function showTab(t){
   // a war opens underneath the war tab rather than replacing the page
   const inWar = dashTab==="war" && !!war;
   for(const id of WAR_CARDS) $(id).hidden = !inWar;
-  $("settings").hidden = !inWar;
+  // The sync URL and token live in here and are faction-wide, so this cannot be
+  // war-only: with no war running there was no way to reach them at all, and
+  // the clubhouse just said "set the worker URL" with nowhere to go and do it.
+  $("settings").hidden = !(inWar || dashTab==="faction");
   $("switchWar").hidden = !inWar;
   $("vsline").hidden = !inWar;
   if(dashTab==="faction"){
@@ -2836,7 +2843,11 @@ const prizeParams=()=>{ const o={prizes:1};
 async function loadClub(){
   // Never fail quietly. A blank card told us nothing twice over, and the cause
   // turned out to be invisible both times.
-  if(!cfg.syncUrl){ $("clubMeta").textContent = "set the worker URL in Polling & data first"; return }
+  if(!cfg.syncUrl){
+    $("clubMeta").innerHTML = `<a href="#" id="clubToSettings">set the worker URL and token below</a>`;
+    $("clubToSettings").onclick = e => { e.preventDefault(); openSync() };
+    return;
+  }
   $("clubMeta").textContent = "reading…";
   try{
     const e = await evCall({enrolled:1, ev:evPicked||""});
@@ -2856,7 +2867,33 @@ async function loadClub(){
       b.disabled=true;
       try{ await evCall({leave:1, id:b.dataset.drop}); loadClub() }catch(err){ b.disabled=false }
     };
-  }catch(err){ $("clubMeta").textContent = err.message || "could not read the member list" }
+  }catch(err){
+    const tok = /token/i.test(err.message||"");
+    $("clubMeta").innerHTML = esc(err.message || "could not read the member list")
+      + (tok? ` &middot; <a href="#" id="clubToSettings">enter the token</a>` : "");
+    if(tok) $("clubToSettings").onclick = e => { e.preventDefault(); openSync() };
+  }
+}
+/* The sync fields were only ever filled in by the war-startup path, so outside
+   a war they sat empty while cfg held real values — and Save sync writes the
+   fields BACK to cfg, so opening the drawer and saving silently wiped the URL.
+   Fill them from cfg whenever the drawer opens, by whatever route. */
+function syncFieldsFromCfg(){
+  $("syncUrl").value = cfg.syncUrl || "";
+  $("syncTok").value = cfg.syncTok || "";
+  $("syncTest").checked = !!cfg.syncTest;
+  $("syncByFac").checked = !!cfg.syncByFac;
+  $("pAtk").value = cfg.pAtk; $("pMem").value = cfg.pMem;
+}
+$("settings").addEventListener("toggle", ()=>{ if($("settings").open) syncFieldsFromCfg() });
+
+// Open the settings drawer and put the cursor where it is needed.
+function openSync(){
+  $("settings").hidden = false;
+  syncFieldsFromCfg();
+  $("settings").open = true;
+  $("settings").scrollIntoView({behavior:"smooth", block:"center"});
+  setTimeout(()=>{ const f = cfg.syncUrl? $("syncTok") : $("syncUrl"); f.focus() }, 400);
 }
 let evPicked=null, evLast=null;
 function renderEvent(j){
@@ -3660,11 +3697,15 @@ async function fetchServerSnaps(){
   }
 }
 $("syncSave").onclick = ()=>{
-  cfg.syncUrl = $("syncUrl").value.trim();
+  // an empty box means "I did not change this", not "turn the tracker off"
+  cfg.syncUrl = $("syncUrl").value.trim() || DEFAULT_SYNC;
+  $("syncUrl").value = cfg.syncUrl;
   cfg.syncTok = $("syncTok").value.trim();
   cfg.syncTest = $("syncTest").checked;
   cfg.syncByFac = $("syncByFac").checked;
   save(LS.cfg,cfg);
+  loadClub();                                  // show straight away that it took
+  loadEvent().catch(()=>{});
   if(cfg.syncUrl && war) fetchServerSnaps().then(c=>{ if(c) renderAll() });
   else $("syncMeta").textContent = "Cloud sync off — statuses only record while a page is open.";
 };
