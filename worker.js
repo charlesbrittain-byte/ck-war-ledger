@@ -93,7 +93,11 @@ export default {
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const ev = evOf(doc, url.searchParams.get("close"));
         if (!ev) return json({ error: "no such event" }, 404, cors);
-        const banked = ev.archived || await archiveEvent(env, doc, ev);
+        // Always re-bank, never trust the snapshot taken when it ended. That one
+        // was written the moment the clock ran out; members have been added from
+        // their logs since, and the scoring curve has been corrected. Closing is
+        // the deliberate "this is the final word" action, so it should mean it.
+        const banked = await archiveEvent(env, doc, ev);
         doc.events = doc.events.filter(e => e !== ev);
         await save();
         return json({ ok: true, banked }, 200, cors);
@@ -176,6 +180,11 @@ export default {
                            rewoundBy: since.length, baseline: rb.first, gained: last - rb.first, xanax: xl });
             }
           }
+        }
+        // anything already banked now says something different, so bank it again
+        for (const ev of doc.events) {
+          if (only && ev.id !== only) continue;
+          if (ev.archived) await archiveEvent(env, doc, ev);
         }
         await save();
         return json({ ok: true, rebuilt: done, added }, 200, cors);
