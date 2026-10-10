@@ -272,10 +272,14 @@ export default {
         // boards recorded by an older build lost their baseline timestamp from
         // the series, but firstAt still has it — put the anchor back
         if (ser.length && u.firstAt && ser[0][0] > u.firstAt) ser.unshift([u.firstAt, 0]);
+        const spent = energyOf(doc, ev, uid, u, now);
         return {
           id: +uid, name: u.name,
           gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
-          adj: scoreOf(u, g), exact: !!u.fs, split: !!u.ls, jump: jumpOf(doc, ev, uid, u, now),
+          adj: scoreOf(u, g, spent), exact: !!u.fs, split: !!u.ls, jump: jumpOf(doc, ev, uid, u, now),
+          // whether the cap actually bit, so the page can say so rather than
+          // leaving someone to wonder why a big number scored less than it looks
+          capped: (u.first > 0 && g > 0 && spent > 0 && g > CAPX * parOf(u.first) * spent) || false,
           xan: xanTaken(doc, ev, uid, u, now), xanFromLog: u.xanLog != null,
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
           cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
@@ -312,7 +316,8 @@ export default {
                       board: boardFor(ev), keyTest: isAdmin ? (ev.keyTest || null) : null }));
       const first = events.find(e => e.open) || events[events.length - 1] || null;
       return json({ events, now, you: id || null, enrolled: enrolledMe, history,
-                    scoring: { knee: KNEE, aLo: A_LO, aHi: A_HI, tilt: TILT, ref: REF, floor: FLOOR,
+                    scoring: { k1: K1, k2: K2, a1: A1, a2: A2, a3: A3, capx: CAPX,
+                               tilt: TILT, ref: REF, floor: FLOOR,
                                parAt: PAR_AT, parT: PAR_T },
                     // what a page written before multiple events understands
                     event: first ? { from: first.from, to: first.to, name: first.name } : {},
@@ -535,7 +540,7 @@ function finalBoard(doc, ev){
     const g = (u.last || 0) - (u.first || 0);
     return { id: +uid, name: u.name || "",
       gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw, kept for the detail view
-      adj: scoreOf(u, g), exact: !!u.fs,
+      adj: scoreOf(u, g, energyOf(doc, ev, uid, u, now)), exact: !!u.fs,
       xan: xanTaken(doc, ev, uid, u, now),
       refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
       cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)) };
@@ -570,22 +575,31 @@ async function archiveEvent(env, doc, ev){
    about 45M total it falls off a cliff, and that is where big players get hurt.
    One exponent cannot describe both, so there are two, meeting at the knee.
 
-   A_HI is the number to be careful with. It is set so the curve passes through
-   the measured median of the top bin, and it then agrees with all three bins
-   above the knee to within 0.8% — 12.1M, 44.8M and 4.12bn — on two points it was
-   not fitted to. An earlier version of this used 0.40, which came from comparing
-   the curve at Top's event baseline of 5.48bn against a median measured at
-   4.12bn. Different sizes; the comparison was worthless and it left the top of
-   the curve 16% low. Always compare the curve to a measurement at the SAME total.
+   Measured from 15,467 real gym trainings across all six members who share a
+   log, pooled and binned by total stats. What makes this one trustworthy where
+   the earlier fits were not: every band below a million now has four or five
+   DIFFERENT players in it — Tpizz, Miramafia, theark, Mr_jeff14574 and
+   spill_298 all have history down at stat 10 — so size is no longer standing in
+   for "which person is this". The earlier two- and three-player fits could not
+   separate the two, and got the bottom badly wrong as a result.
 
-   What the score comes out as, exactly:
+   Measured slope of gain-per-energy, segment by segment:
 
-       score  =  100 x energy x (how well it was used, vs par for your size) x tilt
+       300k -> 80M          0.80 .. 1.16, call it 0.95
+       80M  -> 4.2bn        0.34
+       under 300k           0.50, and this is the correction
 
-   which is worth keeping in mind when a result looks surprising. Someone can put
-   in more energy and still finish behind, because the middle term is doing real
-   work. Of the three with measured energy that first weekend: spill_298 2,810
-   energy at 1.70x par, Mr_jeff14574 2,940 at 1.28x, Top 2,610 at 0.87x.
+   The bottom segment is the news. Extrapolating the middle slope down there,
+   which is what the previous version did, under-stated par for a small member by
+   about a quarter and inflated their score to match. It had Tpizz at 2.14x par
+   when he was actually at 0.91x, and Miramafia at 4.49x when he was at 3.40x.
+
+   Fitted this way the curve sits within 5% of the measured median across every
+   band from 2,600 total upwards; the old one was 15% out. Below about a thousand
+   total it is still poor, and nobody is down there.
+
+   TILT is the deliberate thumb on the scale, and the only constant here that is
+   a preference rather than a measurement.
 
    Deliberately NOT corrected for: which of the four stats someone trains. Torn
    prices a gym gain off the individual stat, not the total, so training your
@@ -610,7 +624,7 @@ async function archiveEvent(env, doc, ev){
    - TILT is the only one that is a PREFERENCE. Raise it to handicap big players
      harder, drop it to ease off, set it to 0 for dead level. Across this faction's
      range, 141k to 5.5bn, each 0.01 of TILT is about an 11% swing end to end.
-   - KNEE, A_LO and A_HI are MEASUREMENTS, not preferences. Do not move them to
+   - K1, K2, A1, A2 and A3 are MEASUREMENTS, not preferences. Do not move them to
      change a placing; move them only when a new gym log says the curve is wrong.
      The signal for that is the vsPar column: it should scatter around 1.0 with no
      relation to size. If big members sit consistently below 1.0 and small ones
@@ -640,20 +654,28 @@ async function archiveEvent(env, doc, ev){
    - A member's own weekend cannot be used to check the curve, because effort and
      size are mixed in it: spill_298 trained at 1.70x his par that weekend,
      Mr_jeff14574 at 1.30x and Top at 1.05x. */
-const KNEE  = 45000000;     // total of the four stats, where the curve breaks
-const A_LO  = 0.95;         // measured slope below the knee
-const A_HI  = 0.4387;       // measured slope above it
+const K1    = 300000;       // total stats: below here the curve flattens off
+const K2    = 80000000;     // and above here it flattens off again
+const A1    = 0.50;         // measured slope below K1
+const A2    = 0.95;         // measured slope between K1 and K2
+const A3    = 0.34;         // measured slope above K2
 const REF   = 10000000;     // scale anchor only; moving it moves every score alike
 const TILT  = 0.02;         // the deliberate tilt against big players
 const FLOOR = 20000;        // damps the very bottom, below the measured range
+const CAPX  = 2.5;          // a weekend is scored as at most this many times par
 const PAR_AT = 126.62;      // measured gain per energy ...
 const PAR_T  = 12114816;    // ... at this total, the mid-range anchor
 
-// The denominator with no tilt: gain divided by this is size-blind.
-function denomNeutral(T){
+// Three straight lines in log-log, joined at the knees. Anchored so a member
+// whose four stats total REF gets a denominator of exactly REF.
+function curve(T){
   const t = (T || 0) + FLOOR;
-  return KNEE * Math.pow(t / KNEE, t <= KNEE ? A_LO : A_HI);
+  if (t <= K1) return A1 * Math.log(t / K1);
+  if (t <= K2) return A2 * Math.log(t / K1);
+  return A2 * Math.log(K2 / K1) + A3 * Math.log(t / K2);
 }
+// The denominator with no tilt: gain divided by this is size-blind.
+function denomNeutral(T){ return REF * Math.exp(curve(T) - curve(REF)) }
 // Stat points per energy that ordinary training buys at this size.
 function parOf(T){ return PAR_AT / denomNeutral(PAR_T) * denomNeutral(T) }
 
@@ -679,6 +701,22 @@ function denomOf(u){
 const JUMP_PAR = parOf;        // the same measured curve the score uses
 const JUMP_AT = 2;             // below this it is ordinary training
 
+/* What they had to spend. Measured where the gym log gives it, estimated
+   otherwise — and the estimate is pitched high on purpose: over-stating someone's
+   energy can only hide a jump, it can never invent one. The cap and the jump
+   flag both read this, so they cannot disagree about the same weekend. */
+function energyOf(doc, ev, uid, u, now){
+  if (u.gymE > 0) return u.gymE;
+  const secs = Math.max(0, Math.min(ev.to, now) - (u.firstAt || ev.from));
+  const xan = xanTaken(doc, ev, uid, u, now);
+  const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
+  const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
+  return secs / 180                  // natural regen, 5 every 15 min
+       + xan * 250                   // xanax, faction and personal
+       + ref * (u.maxE || 150)       // a refill is a full bar
+       + drk * 50;                   // energy cans, pitched high
+}
+
 function jumpOf(doc, ev, uid, u, now){
   if (!(u.first > 0)) return null;
   const gain = (u.last || 0) - (u.first || 0);
@@ -686,25 +724,28 @@ function jumpOf(doc, ev, uid, u, now){
   const perEnergy = JUMP_PAR(u.first || 0);   // stat points per energy at their size
   if (perEnergy <= 0) return null;
   const implied = gain / perEnergy;
-  const secs = Math.max(0, Math.min(ev.to, now) - (u.firstAt || ev.from));
-  const xan = xanTaken(doc, ev, uid, u, now);
-  const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
-  const drk = Math.max(0, (u.drk || 0) - (u.firstD || 0));
-  // measured beats estimated: if their log is readable, that IS the energy
-  const available = (u.gymE > 0) ? u.gymE
-                  : secs / 180                 // natural regen, 5 every 15 min
-                  + xan * 250                  // xanax, faction and personal
-                  + ref * (u.maxE || 150)      // a refill is a full bar
-                  + drk * 50;                  // energy cans, pitched high
+  const available = energyOf(doc, ev, uid, u, now);
   if (available <= 0) return null;
   const x = implied / available;
   return x >= JUMP_AT ? +x.toFixed(1) : null;
 }
 
-function scoreOf(u, gain){
+/* A weekend counts for at most CAPX times what ordinary training buys at that
+   size. Jumps stay allowed and stay visible — the board prints the real gain,
+   the real percentage and the real multiplier — but one enormous jump could
+   otherwise settle a whole event, and what is being rewarded is the work put in
+   across the weekend. Capping needs the energy, so in practice it needs a gym
+   log; without one the energy is estimated, and that estimate is pitched high
+   on purpose, so the cap is slow to bite for anyone not sharing. */
+function scoreOf(u, gain, energy){
   const { d, tilt } = denomOf(u);
   if (!(d > 0)) return 0;
-  return +(100 * gain / d * tilt).toFixed(3);
+  let g = gain;
+  if (energy > 0) {
+    const ceiling = CAPX * parOf(u.first || 0) * energy;
+    if (ceiling > 0 && g > ceiling) g = ceiling;
+  }
+  return +(100 * g / d * tilt).toFixed(3);
 }
 
 /* Xanax comes from the faction armoury log rather than each member's own

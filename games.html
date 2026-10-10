@@ -50,6 +50,8 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .rank{color:var(--faint); width:2.2em}
 .gain{font-weight:700; font-size:17px}
 .pos{color:var(--up)} .zero{color:var(--faint)}
+.capped{display:inline-block; margin-left:6px; padding:1px 5px; border-radius:4px; font-size:11px;
+  background:#2A2F36; color:var(--faint); border:1px solid var(--line); vertical-align:middle}
 .neg{color:var(--down,#c0675f)}
 .medal{font-size:17px}
 .tblwrap{overflow-x:auto; margin-top:4px}
@@ -234,6 +236,10 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     of each other, with the biggest at the bottom of that band.
     <br><br>Anyone under about 50k total stats should treat their score as provisional &mdash; the curve is measured
     down to roughly that point and no further.
+    <br><br><b>Big sessions are scored up to a ceiling.</b> A weekend counts for at most <b>2.5&times;</b> what ordinary
+    training buys at your size. Anything above that still shows in full &mdash; your real gain, your real percentage and
+    your real multiplier are all on the board untouched &mdash; but the score stops there, marked <span class="capped">capped</span>.
+    Jumps are still well worth doing; one enormous one just cannot decide the whole event on its own.
     <br><br>A <b>&#9889; multiplier</b> beside a name means that person gained several times more than the energy
     they got through can normally buy — which is what a happy jump looks like from the outside. It is shown for
     interest and <b>does not change anyone's score</b>; jumps are allowed. Nothing appears for ordinary training.
@@ -613,7 +619,9 @@ function render(data){
       + `</td>`
       + `<td class="gain ${r.adj>0?"pos":"zero"}">`
       + (r.adj>0? `<span class="barfill" style="width:${(100*shareOf(r,pool)/lead).toFixed(1)}%"></span>` : "")
-      + `<span class="barval">${r.adj>0? shareOf(r,pool).toFixed(1)+"%" : "—"}</span></td>`
+      + `<span class="barval">${r.adj>0? shareOf(r,pool).toFixed(1)+"%" : "—"}</span>`
+      + (r.capped? `<span class="capped" title="This gain came to more than 2.5\u00d7 what ordinary training buys at this size, so it is scored as 2.5\u00d7. The real figures are shown in full in the other columns.">capped</span>` : "")
+      + `</td>`
       + `<td class="meta">${r.adj>0? "+"+r.adj.toFixed(2)+"%" : "—"}</td>`
       + `<td class="meta">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
       + `<td>${pills(r.xan)}</td><td class="meta">${num(r.refills)}</td>`
