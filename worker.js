@@ -190,10 +190,51 @@ export default {
         if (ev.to < now) return json({ error: "that event has finished" }, 400, cors);
         ev.roster = ev.roster || {};
         if (url.searchParams.has("unjoin")) { delete ev.roster[id]; delete ev.users[id] }
-        else ev.roster[id] = now;
-        doc.nextPoll = 0;                       // pick them up on the next tick
+        else {
+          ev.roster[id] = now;
+          /* Take their starting point right now rather than waiting for the next
+             tick. Joining and then seeing an empty board for two minutes looks
+             broken, and for anyone sharing a gym log we can do far better than a
+             blank row: their real baseline from the moment the event opened, the
+             energy they have already spent and the line they have already drawn. */
+          const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
+          const k = keys[id];
+          if (k && !ev.users[id]) {
+            const r = await readMember(k.key, false);
+            if (r && !r._error) {
+              const upto = Math.min(ev.to, now);
+              const u = { name: k.name, first: r.total, firstAt: now, fs: r.stats || null,
+                          ls: r.stats || null, last: r.total, s: [[now, r.total]],
+                          maxE: k.maxE || 150 };
+              if (k.log) {
+                const sess = await gymSessions(k.key, ev.from, upto);
+                if (sess && sess.length) {
+                  const rb = fromSessions(sess, r.stats, ev.from);
+                  if (rb) {
+                    u.first = rb.first; u.fs = rb.fs; u.fsEst = false;
+                    u.gymE = rb.energy; u.fromLog = true;
+                    u.s = rb.series.slice();
+                    u.last = rb.series[rb.series.length - 1][1];
+                  }
+                } else if (sess) {
+                  // sharing a log and not trained yet: the start of the event IS
+                  // their baseline, so they are not counted as joining late
+                  u.firstAt = ev.from; u.fromLog = true; u.gymE = 0;
+                  u.s = [[ev.from, r.total]];
+                }
+                const xl = await xanaxFromLog(k.key, ev.from, upto);
+                if (xl != null) u.xanLog = xl;
+              }
+              ev.users[id] = u;
+            }
+          }
+        }
+        doc.nextPoll = 0;                       // and keep reading from now on
         await save();
-        return json({ ok: true, joined: !!ev.roster[id] }, 200, cors);
+        return json({ ok: true, joined: !!ev.roster[id],
+                      showing: ev.users[id] ? { from: ev.users[id].firstAt,
+                                                fromLog: !!ev.users[id].fromLog,
+                                                gymE: ev.users[id].gymE != null ? ev.users[id].gymE : null } : null }, 200, cors);
       }
 
       // Opting in: a member hands over their own key so the worker can take the
