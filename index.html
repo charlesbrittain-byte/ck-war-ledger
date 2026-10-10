@@ -481,7 +481,7 @@ details.settings summary{cursor:pointer}
   <datalist id="prizeList"></datalist>
   <div class="zoomrow">
     <span class="lbl">Name</span>
-    <input id="evName" placeholder="Training weekend" style="min-width:150px">
+    <input id="evName" placeholder="Training weekend" style="min-width:150px" maxlength="80">
     <span class="lbl">From</span>
     <input type="datetime-local" id="evFrom">
     <span class="lbl">to</span>
@@ -3038,8 +3038,12 @@ $("evEdit").onclick=async()=>{
   $("evEdit").disabled=true; $("evProg").textContent="saving…";
   try{
     await evCall(q);
-    renderEvent(await evCall({hist:1}));
-    $("evProg").textContent="saved";
+    const j=await evCall({hist:1}); renderEvent(j);
+    // the name has a length limit; say so rather than letting the tail vanish
+    const saved=((j.events||[]).find(e=>e.id===evPicked)||{}).name;
+    $("evProg").textContent = (saved!=null && q.name && saved!==q.name)
+      ? "saved, but the name was shortened to " + saved.length + " characters"
+      : "saved";
   }catch(e){
     // moving the start of a running event is refused; the rest still applied
     if(/already started/.test(e.message)){

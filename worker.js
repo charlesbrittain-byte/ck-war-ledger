@@ -54,7 +54,7 @@ export default {
         const to = +url.searchParams.get("to") || (from + 2 * 86400);
         if (to <= from) return json({ error: "the end must be after the start" }, 400, cors);
         const ev = { id: String(from) + "-" + Math.random().toString(36).slice(2, 6),
-                     name: (url.searchParams.get("name") || "").slice(0, 40),
+                     name: (url.searchParams.get("name") || "").slice(0, NAME_MAX),
                      from, to, users: {}, locked: false, archived: false, keyTest: null,
                      prizes: readPrizes(url), roster: {} };
         doc.events.push(ev);
@@ -68,7 +68,7 @@ export default {
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
         const ev = evOf(doc, url.searchParams.get("ev")) || doc.events[0];
         if (!ev) return json({ error: "there is no event to edit" }, 400, cors);
-        if (url.searchParams.has("name")) ev.name = (url.searchParams.get("name") || "").slice(0, 40);
+        if (url.searchParams.has("name")) ev.name = (url.searchParams.get("name") || "").slice(0, NAME_MAX);
         if (url.searchParams.has("prizes")) ev.prizes = readPrizes(url);   // "prizes=1" means these are the prizes
         if (url.searchParams.has("to")) {
           const to = +url.searchParams.get("to") || 0;
@@ -491,6 +491,9 @@ async function tickFriends(env, t, atWar) {
 // Totals are stored but never served — the series goes out as percentages.
 // Finished events, newest first. Only where everyone landed — no series, so a
 // couple of dozen events stay small enough to send with every board read.
+// 40 was too short and cut silently: "... - prize donated by friendly_derek"
+// landed exactly on the limit and came back as "... - prize ".
+const NAME_MAX = 80;
 const HIST_KEY = "trainhist", HIST_MAX = 24, HIST_ROWS = 60;
 
 /* Several events can run at once — a training weekend and a side game, say.
