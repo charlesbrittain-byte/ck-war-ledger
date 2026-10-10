@@ -337,7 +337,7 @@ export default {
         const ser = den > 0 ? (u.s || []).map(([ts, v]) => [ts, toY(v)]) : [];
         // the bolts: a single training that beat par by JUMP_MARK or more, put
         // through the same conversion so each one sits exactly on the line
-        const marks = den > 0 ? (u.jx || []).map(([ts, v, x]) => [ts, toY(v), x]) : [];
+        const marks = den > 0 ? (u.jx || []).map(([ts, v, x, e]) => [ts, toY(v), x, e || 0]) : [];
         // boards recorded by an older build lost their baseline timestamp from
         // the series, but firstAt still has it — put the anchor back
         if (ser.length && u.firstAt && ser[0][0] > u.firstAt) ser.unshift([u.firstAt, 0]);
@@ -943,7 +943,9 @@ function fromSessions(sessions, nowStats, from){
     const x = (g.energy > 0 && par > 0) ? (g.inc / g.energy) / par : 0;
     run += g.inc;
     series.push([g.t, +run.toFixed(2)]);
-    if (x >= JUMP_MARK) jumps.push([g.t, +run.toFixed(2), +x.toFixed(1)]);
+    // energy too: how much was spent at that multiple says more than how many
+    // separate trainings it was split across
+    if (x >= JUMP_MARK) jumps.push([g.t, +run.toFixed(2), +x.toFixed(1), g.energy]);
   }
   // keep it to a sane size for the chart
   let s2 = series;

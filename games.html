@@ -472,27 +472,28 @@ function drawChart(ev, now){
        like an unreadable smear. */
     const groups=[];
     for(const m of (r.marks||[])){
-      const px=X(m[0]);
+      const px=X(m[0]), e=m[3]||0;
       const g=groups[groups.length-1];
-      if(g && px-g.px < 14){ g.n++; g.hi=Math.max(g.hi,m[2]); g.last=m[0]; g.v=m[1] }
-      else groups.push({px, v0:m[1], v:m[1], n:1, hi:m[2], first:m[0], last:m[0]});
+      // the multiple is what matters, so a group carries the energy-weighted one
+      // across everything in it, plus the energy that bought it
+      if(g && px-g.px < 14){ g.e+=e; g.wx+=m[2]*e; g.last=m[0]; g.v=m[1] }
+      else groups.push({px, v0:m[1], v:m[1], e, wx:m[2]*e, first:m[0], last:m[0]});
     }
     for(const g of groups){
+      const mult = g.e>0 ? g.wx/g.e : 0;
       // sit ON the line, not floating above the chart. A burst is a near-vertical
       // climb, so the midpoint of what it covers puts the bolt on that segment.
       const py=Y(((g.v0+g.v)/2)*k);
-      const when = g.n>1 ? `${fmtClock(g.first)}\u2013${fmtClock(g.last)}` : fmtClock(g.first);
-      const what = g.n>1
-        ? `${g.n} trainings over \u00d72 normal, biggest \u00d7${g.hi}`
-        : `one training at \u00d7${g.hi} what the gym normally gives at their size`;
-      const tip = `${esc(r.name)} \u2014 ${what}, ${when}`;
+      const when = g.last>g.first ? `${fmtClock(g.first)}\u2013${fmtClock(g.last)}` : fmtClock(g.first);
+      const tip = `${esc(r.name)} \u2014 ${g.e.toLocaleString()} energy trained at \u00d7${mult.toFixed(1)} `
+                + `what the gym normally gives at their size, ${when}`;
       // the transparent disc is the tap target: a 14px glyph is far too small a
       // thing to hit with a thumb
       p+=`<g class="bolt" data-tip="${tip.replace(/"/g,"&quot;")}" style="cursor:pointer">`
        + `<circle cx="${g.px.toFixed(1)}" cy="${py.toFixed(1)}" r="18" fill="transparent"/>`
        + `<text x="${g.px.toFixed(1)}" y="${py.toFixed(1)}" text-anchor="middle" dominant-baseline="central"`
        + ` font-size="20" fill="${c}" style="filter:drop-shadow(0 0 3px ${c}) drop-shadow(0 0 9px ${c})">`
-       + `\u26A1${g.n>1? `<tspan font-size="11" dy="-7" style="filter:none">${g.n}</tspan>` : ""}</text></g>`;
+       + `\u26A1</text></g>`;
     }
   });
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
