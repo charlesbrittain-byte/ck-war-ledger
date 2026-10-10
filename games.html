@@ -50,6 +50,8 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .rank{color:var(--faint); width:2.2em}
 .gain{font-weight:700; font-size:17px}
 .pos{color:var(--up)} .zero{color:var(--faint)}
+#board tr{transition:background .12s}
+#board tr:hover{background:#1A1F26}
 .capped{display:inline-block; margin-left:6px; padding:1px 5px; border-radius:4px; font-size:11px;
   background:#2A2F36; color:var(--faint); border:1px solid var(--line); vertical-align:middle}
 .neg{color:var(--down,#c0675f)}
@@ -292,7 +294,7 @@ const GAMES_TOKEN = "CUS8m8dcKCuVWoihKuzdhkvF9D2wmbo6";
 const BUILD = "2026-10-09 16:51";
 const $ = id => document.getElementById(id);
 const LS = { key:"ckc_key", me:"ckc_me", maxe:"ckc_maxe", out:"ckc_out" };
-let me = null, lastData = null, lastHist = null;
+let me = null, lastData = null, lastHist = null, capX = 2.5;
 
 $("build").textContent = "build " + BUILD;
 
@@ -414,6 +416,27 @@ function drawChart(ev, now){
     p+=`<path d="${d}" fill="none" stroke="${c}" stroke-width="${mine?3.2:2}" stroke-linejoin="round" stroke-linecap="round" opacity="${mine?1:.85}"/>`;
     const last=pts[pts.length-1];
     if(last) p+=`<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="${mine?4:3}" fill="${c}"><title>${esc(r.name)} ${(sc(r)*k).toFixed(1)}% of the room, raw +${r.gain.toFixed(2)}%</title></circle>`;
+    /* A bolt per training that beat par for their size. Several in a row land on
+       top of each other, so anything within 14px is drawn as one bolt that says
+       how many it stands for — a burst of fourteen should not look like one, nor
+       like an unreadable smear. */
+    const groups=[];
+    for(const m of (r.marks||[])){
+      const px=X(m[0]);
+      const g=groups[groups.length-1];
+      if(g && px-g.px < 14){ g.n++; g.hi=Math.max(g.hi,m[2]); g.last=m[0]; g.v=m[1] }
+      else groups.push({px, v:m[1], n:1, hi:m[2], first:m[0], last:m[0]});
+    }
+    for(const g of groups){
+      const py=Y(g.v*k);
+      const when = g.n>1 ? `${fmtClock(g.first)}\u2013${fmtClock(g.last)}` : fmtClock(g.first);
+      const what = g.n>1
+        ? `${g.n} trainings over \u00d72 normal, biggest \u00d7${g.hi}`
+        : `one training at \u00d7${g.hi} what the gym normally gives at their size`;
+      p+=`<text x="${g.px.toFixed(1)}" y="${(py-8).toFixed(1)}" text-anchor="middle" font-size="14" fill="${c}" style="cursor:help">`
+       + `\u26A1${g.n>1? `<tspan font-size="10" dy="-3">${g.n}</tspan>` : ""}`
+       + `<title>${esc(r.name)} \u2014 ${what}, ${when}</title></text>`;
+    }
   });
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
   svg.innerHTML=p;
@@ -516,6 +539,7 @@ const fmtClock = t => new Date(t*1000).toISOString().slice(11,16) + " TCT";
 let curEv = null;                       // which event's board is showing
 function render(data){
   const now = data.now || Math.floor(Date.now()/1000);
+  if(data.scoring && data.scoring.capx) capX = data.scoring.capx;
   // several events can run at once; they get a tab each rather than a card each,
   // which keeps the page the same shape on a phone
   const evs = data.events || (data.event && data.event.from ? [{...data.event, id:"legacy", board:data.board||[], open:data.open}] : []);
@@ -619,14 +643,14 @@ function render(data){
       + `<td class="gain ${r.adj>0?"pos":"zero"}">`
       + (r.adj>0? `<span class="barfill" style="width:${(100*shareOf(r,pool)/lead).toFixed(1)}%"></span>` : "")
       + `<span class="barval">${r.adj>0? shareOf(r,pool).toFixed(1)+"%" : "—"}</span>`
-      + (r.capped? `<span class="capped" title="This gain came to more than 2.5\u00d7 what ordinary training buys at this size, so it is scored as 2.5\u00d7. The real figures are shown in full in the other columns.">capped</span>` : "")
+      + (r.capped? `<span class="capped" title="${r.vsPar? "This weekend came to \u00d7"+r.vsPar.toFixed(2)+" of what ordinary training buys at this size, so it is scored as \u00d7"+capX+"." : "More than \u00d7"+capX+" of par, so it is scored as \u00d7"+capX+"."} The real gain, percentage and multiplier are all shown in full.">capped</span>` : "")
       + `</td>`
       + `<td class="meta">${r.adj>0? "+"+r.adj.toFixed(2)+"%" : "—"}</td>`
       + `<td class="meta">${r.gain>0? "+"+r.gain.toFixed(2)+"%" : "—"}</td>`
       + `<td>${pills(r.xan)}</td><td class="meta">${num(r.refills)}</td>`
       + `<td class="meta">${num(r.cans)}</td>`
       + `<td class="meta">${r.gymE==null? "&mdash;" : r.gymE.toLocaleString()}</td>`
-      + `<td class="${r.vsPar==null? "meta" : r.vsPar>=1? "pos":"neg"}" title="gain per energy against what ordinary training buys at your size">`
+      + `<td class="${r.vsPar==null? "meta" : r.vsPar>=1? "pos":"neg"}" title="${r.vsPar==null? "Needs a gym log \u2014 without one we cannot know the energy." : esc(r.name)+" got \u00d7"+r.vsPar.toFixed(2)+" what ordinary training buys at their size across "+(r.gymE||0).toLocaleString()+" energy"+(r.capped? ", scored as \u00d7"+capX : "")+"."}">`
       + `${r.vsPar==null? "&mdash;" : "&times;"+r.vsPar.toFixed(2)}</td>`
       + `<td class="meta">${r.lateBy>1800? fmtLeft(r.lateBy)+" late" : "from the start"}</td></tr>`;
   }).join("") : `<tr><td colspan="11" class="meta">Nobody has recorded yet — be first.</td></tr>`;

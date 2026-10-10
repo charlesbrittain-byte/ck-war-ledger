@@ -129,7 +129,11 @@ export default {
         for (const ev of doc.events) {
           if (only && ev.id !== only) continue;
           for (const [id, u] of Object.entries(ev.users || {})) {
-            if (u.fromLog) { done.push({ ev: ev.id, name: u.name, skipped: "already from the log" }); continue }
+            // &force=1 re-reads a log we have already used, for when the rebuild
+            // itself has learned to extract something new from it
+            if (u.fromLog && !url.searchParams.has("force")) {
+              done.push({ ev: ev.id, name: u.name, skipped: "already from the log" }); continue;
+            }
             if (!keys[id] || !keys[id].log) { done.push({ ev: ev.id, name: u.name, skipped: "no log key" }); continue }
             const sess = await gymSessions(keys[id].key, ev.from, ev.to);
             if (!sess) { done.push({ ev: ev.id, name: u.name, skipped: "log unreadable" }); continue }
@@ -142,6 +146,7 @@ export default {
             const was = { first: u.first, gymE: u.gymE || null };
             u.first = rb.first; u.fs = rb.fs; u.fsEst = false;
             u.gymE = rb.energy; u.fromLog = true; u.s = rb.series.slice();
+            u.jx = rb.jumps || [];
             const xl = await xanaxFromLog(keys[id].key, ev.from, ev.to);
             if (xl != null) u.xanLog = xl;
             done.push({ ev: ev.id, name: u.name, sessions: sess.length, energy: rb.energy,
@@ -172,6 +177,7 @@ export default {
               const last = rb.series[rb.series.length - 1][1];
               ev.users[id] = { name: k.name, first: rb.first, firstAt: ev.from, fs: rb.fs, fsEst: false,
                                ls: end, last, gymE: rb.energy, fromLog: true, s: rb.series.slice(),
+                               jx: rb.jumps || [],
                                maxE: k.maxE || 150 };
               const xl = await xanaxFromLog(k.key, ev.from, ev.to);
               if (xl != null) ev.users[id].xanLog = xl;
@@ -222,7 +228,7 @@ export default {
                   if (rb) {
                     u.first = rb.first; u.fs = rb.fs; u.fsEst = false;
                     u.gymE = rb.energy; u.fromLog = true;
-                    u.s = rb.series.slice();
+                    u.s = rb.series.slice(); u.jx = rb.jumps || [];
                     u.last = rb.series[rb.series.length - 1][1];
                   }
                 } else if (sess) {
@@ -327,7 +333,11 @@ export default {
           return full > 0 ? cut / full : 1;
         })();
         // the chart follows the ranking, so it plots the adjusted score
-        const ser = den > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / den * tilt * capK).toFixed(3)]) : [];
+        const toY = v => +(100 * (v - u.first) / den * tilt * capK).toFixed(3);
+        const ser = den > 0 ? (u.s || []).map(([ts, v]) => [ts, toY(v)]) : [];
+        // the bolts: a single training that beat par by JUMP_MARK or more, put
+        // through the same conversion so each one sits exactly on the line
+        const marks = den > 0 ? (u.jx || []).map(([ts, v, x]) => [ts, toY(v), x]) : [];
         // boards recorded by an older build lost their baseline timestamp from
         // the series, but firstAt still has it — put the anchor back
         if (ser.length && u.firstAt && ser[0][0] > u.firstAt) ser.unshift([u.firstAt, 0]);
@@ -347,6 +357,7 @@ export default {
           // meaningful where the energy is measured rather than estimated.
           vsPar: (u.gymE > 0 && u.first > 0 && g > 0)
                  ? +((g / u.gymE) / parOf(u.first)).toFixed(2) : null,
+          marks,
           since: u.firstAt, updated: u.lastAt,
           lateBy: u.fromLog ? 0 : Math.max(0, u.firstAt - ev.from),
           series: ser
@@ -762,6 +773,7 @@ function denomOf(u){
    available can only hide a jump; it can never invent one. */
 const JUMP_PAR = parOf;        // the same measured curve the score uses
 const JUMP_AT = 2;             // below this it is ordinary training
+const JUMP_MARK = 2;           // a single training at this multiple gets a bolt on the chart
 
 /* What they had to spend. Measured where the gym log gives it, estimated
    otherwise — and the estimate is pitched high on purpose: over-stating someone's
@@ -920,11 +932,23 @@ function fromSessions(sessions, nowStats, from){
   const first = start.s + start.d + start.p + start.x;
   let run = first;
   const series = [[from, first]];
-  for (const g of sessions) { run += g.inc; series.push([g.t, +run.toFixed(2)]) }
+  /* A single training that returned well over what the gym normally gives at
+     that size — the signature of a happy jump. Priced per session against par
+     for the stats they had going IN, so it is the training being judged, not
+     the weekend. These carry their own value rather than a series index, so
+     they survive the thinning below. */
+  const jumps = [];
+  for (const g of sessions) {
+    const par = parOf(run);
+    const x = (g.energy > 0 && par > 0) ? (g.inc / g.energy) / par : 0;
+    run += g.inc;
+    series.push([g.t, +run.toFixed(2)]);
+    if (x >= JUMP_MARK) jumps.push([g.t, +run.toFixed(2), +x.toFixed(1)]);
+  }
   // keep it to a sane size for the chart
   let s2 = series;
   while (s2.length > 220) s2 = s2.filter((_, i) => i % 2 === 0 || i >= s2.length - 60);
-  return { first, fs: start, series: s2,
+  return { first, fs: start, series: s2, jumps,
            energy: sessions.reduce((a, g) => a + g.energy, 0) };
 }
 
@@ -962,6 +986,7 @@ function applyReading(u, t, r, maxE){
     u.gymE = r.rebuilt.energy;
     u.fromLog = true;
     u.s = r.rebuilt.series.slice();
+    u.jx = r.rebuilt.jumps || [];
   }
   if (r.cons) {
     // each counter gets its own guard. Sharing one meant that adding a counter
