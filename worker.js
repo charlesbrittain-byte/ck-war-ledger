@@ -317,8 +317,17 @@ export default {
       const boardFor = ev => Object.entries(ev.users || {}).map(([uid, u]) => {
         const g = (u.last || 0) - (u.first || 0);
         const { d: den, tilt } = denomOf(u);
+        /* The line has to end where the score ends. The score is capped and the
+           line was not, so a capped member's line ran clean off the top of the
+           chart — past 100% of a board that only adds up to 100. Scale the whole
+           line by however much the cap took off, which keeps its shape and lands
+           the last point exactly on the score. */
+        const capK = (() => {
+          const full = scoreOf(u, g), cut = scoreOf(u, g, energyOf(doc, ev, uid, u, now));
+          return full > 0 ? cut / full : 1;
+        })();
         // the chart follows the ranking, so it plots the adjusted score
-        const ser = den > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / den * tilt).toFixed(3)]) : [];
+        const ser = den > 0 ? (u.s || []).map(([ts, v]) => [ts, +(100 * (v - u.first) / den * tilt * capK).toFixed(3)]) : [];
         // boards recorded by an older build lost their baseline timestamp from
         // the series, but firstAt still has it — put the anchor back
         if (ser.length && u.firstAt && ser[0][0] > u.firstAt) ser.unshift([u.firstAt, 0]);
