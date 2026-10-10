@@ -980,10 +980,16 @@ const LS = {
   ha:"twl_homearm", oc:"twl_oc"          // faction-wide caches, not per war
 };
 const DEFAULT_SYNC = "https://ck-war-ledger.spill298.workers.dev";
+/* Left empty here on purpose, and ONLY filled in by deploy-admin.sh, into the
+   copy that goes to the private leaders' address. This repo is public, so the
+   token must never be committed — it lives in TRACKER_TOKEN.txt, which git
+   ignores. A copy of this page with an empty BAKED_TOK is harmless. */
+const BAKED_TOK = "";
 let cfg = load(LS.cfg) || {key:"", pAtk:120, pMem:60, medHits:3, medBurst:60, medGap:300};
 // The address of the worker is public and fixed, so there is no reason to make
 // anyone type it. The token is the secret and stays hand-entered.
 if(!cfg.syncUrl){ cfg.syncUrl = DEFAULT_SYNC; save(LS.cfg, cfg) }
+if(BAKED_TOK && cfg.syncTok !== BAKED_TOK){ cfg.syncTok = BAKED_TOK; save(LS.cfg, cfg) }
 let war = load(LS.war) || null;   // {facId,facName,warId,oppId,oppName,start,end,terms,label,custom}
 let attacks = [];                  // normalised, sorted by t
 let attackIds = new Set();

@@ -3,3 +3,4 @@
 node_modules/
 TRACKER_TOKEN.txt
 dist/
+ADMIN_PATH.txt
