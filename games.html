@@ -225,17 +225,16 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     total you started on. Only the total matters to the score, so this is close for everyone. Events from here on
     record the real split from the first second.</p>
   <p class="hint">Ranking is on <b>Share</b>, which is just <b>Adjusted %</b> rescaled, so the order is the same.
-    Raw % gain is a poor measure at the top end, because gym gains
-    stop keeping pace with your stats: through the ordinary range the gain a given energy buys rises almost in step
-    with your stats, so raw % is close to fair there, but past about 45&nbsp;million total it falls off a cliff and
-    being big turns into a straight penalty. Adjusted divides your gain by a curve with that shape, so the score comes
-    out as a measure of the energy you actually put in rather than of how small you are. The curve is measured from
-    real gym logs &mdash; 11,329 trainings from the members who share theirs, spanning 10 stat to 2 billion. It is a
-    fixed calculation: your score does not depend on who else entered. Bigger players are still given a slightly
-    harder time, on purpose: train at exactly par for your size and everyone from 141k to 5.5bn lands within 1.23&times;
-    of each other, with the biggest at the bottom of that band.
-    <br><br>Anyone under about 50k total stats should treat their score as provisional &mdash; the curve is measured
-    down to roughly that point and no further.
+    Raw % gain is a poor measure, because gym gains do not keep pace with your stats in a straight line. Through the
+    ordinary range the gain a given energy buys rises almost in step with your stats, so raw % is close to fair there
+    &mdash; but under about 300k total it flattens off, and past about 80 million it falls off a cliff and being big
+    turns into a straight penalty. Adjusted divides your gain by a curve with that shape, so the score comes out as a
+    measure of the energy you actually put in rather than of how big or small you happen to be.
+    <br><br>The curve is measured, not guessed: <b>15,467 real gym trainings</b> from the members who share their log,
+    spanning 10 stat to 2 billion. Every size band has four or five different people in it, which is what stops it
+    measuring "who is this" instead of "how big are they". It sits within 5% of what those logs actually show, right
+    across the range. It is a fixed calculation: your score does not depend on who else entered. Bigger players are
+    still given a slightly harder time, on purpose, but only slightly.
     <br><br><b>Big sessions are scored up to a ceiling.</b> A weekend counts for at most <b>2.5&times;</b> what ordinary
     training buys at your size. Anything above that still shows in full &mdash; your real gain, your real percentage and
     your real multiplier are all on the board untouched &mdash; but the score stops there, marked <span class="capped">capped</span>.
