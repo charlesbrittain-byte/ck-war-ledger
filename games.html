@@ -50,6 +50,15 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .rank{color:var(--faint); width:2.2em}
 .gain{font-weight:700; font-size:17px}
 .pos{color:var(--up)} .zero{color:var(--faint)}
+#tip{position:fixed; z-index:50; max-width:min(300px,86vw); background:#1F252C; color:var(--text);
+  border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:13px; line-height:1.45;
+  box-shadow:0 6px 20px rgba(0,0,0,.45); pointer-events:none}
+.bolt{-webkit-tap-highlight-color:transparent}
+/* a slow breath, so a jump catches the eye without nagging */
+.bolt text{animation:boltPulse 2.4s ease-in-out infinite}
+.bolt:hover text,.bolt:active text{animation:none; opacity:1}
+@keyframes boltPulse{0%,100%{opacity:.78} 50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.bolt text{animation:none}}
 #board tr{transition:background .12s}
 #board tr:hover{background:#1A1F26}
 .capped{display:inline-block; margin-left:6px; padding:1px 5px; border-radius:4px; font-size:11px;
@@ -215,6 +224,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
   </div>
   <svg id="chart" class="chart" preserveAspectRatio="none"></svg>
   <div class="legend" id="legend"></div>
+  <div id="tip" hidden></div>
   <div class="tblwrap">
     <table>
       <thead><tr><th class="rank">#</th><th>Member</th><th>Share</th><th>Adjusted</th><th>Raw</th><th>Xanax</th><th>Refills</th><th>Cans</th><th>Gym E</th><th>vs par</th><th>Started</th></tr></thead>
@@ -386,6 +396,46 @@ async function board(extra={}){
 
 const medals = ["🥇","🥈","🥉"];
 const LINE_COLOURS=["#D9A036","#7FB069","#5E8CA8","#B06FE0","#E86FA8","#57B26A","#4C9BE0","#E0A45B","#8FD0C0","#D0555B"];
+/* A native title attribute does not exist on a touch screen — there is no hover
+   to have. So the bolts carry their own tooltip: tap to pin it, tap anywhere
+   else to dismiss, and on a desktop it still follows the pointer. */
+let tipPinned = false, tipEl = null;
+function showTip(text, el){
+  const tip=$("tip"), r=el.getBoundingClientRect();
+  tipEl = el;
+  tip.textContent=text; tip.hidden=false;
+  const w=tip.offsetWidth, h=tip.offsetHeight;
+  let x=r.left+r.width/2-w/2, y=r.top-h-10;
+  x=Math.max(8, Math.min(x, window.innerWidth-w-8));
+  if(y<8) y=r.bottom+10;                      // not enough room above: go below
+  tip.style.left=x+"px"; tip.style.top=y+"px";
+}
+function hideTip(){ $("tip").hidden=true; tipPinned=false; tipEl=null }
+function bindBolts(svg){
+  for(const el of svg.querySelectorAll(".bolt")){
+    el.addEventListener("click", e=>{
+      e.stopPropagation();
+      if(tipPinned && $("tip").textContent===el.dataset.tip){ hideTip(); return }
+      showTip(el.dataset.tip, el); tipPinned=true;
+    });
+    el.addEventListener("mouseenter", ()=>{ if(!tipPinned) showTip(el.dataset.tip, el) });
+    el.addEventListener("mouseleave", ()=>{ if(!tipPinned) $("tip").hidden=true });
+  }
+}
+document.addEventListener("click", ()=>{ if(tipPinned) hideTip() });
+/* Follow the bolt rather than vanish. Hiding on any scroll looked fine on a
+   desktop and was useless on a phone, where the smallest drag counts as a
+   scroll and took the tooltip with it. */
+function reposition(){
+  if(!tipPinned || !tipEl) return;
+  if(!tipEl.isConnected){ hideTip(); return }
+  const r=tipEl.getBoundingClientRect();
+  if(r.bottom < 0 || r.top > window.innerHeight){ hideTip(); return }   // scrolled away
+  showTip($("tip").textContent, tipEl);
+}
+window.addEventListener("scroll", reposition, {passive:true});
+window.addEventListener("resize", reposition);
+
 function drawChart(ev, now){
   const svg=$("chart"), W=1000, H=190, padL=34, padR=12, padT=14, padB=22;
   const rows=((ev&&ev.board)||[]).filter(r=>(r.series||[]).length);
@@ -425,21 +475,29 @@ function drawChart(ev, now){
       const px=X(m[0]);
       const g=groups[groups.length-1];
       if(g && px-g.px < 14){ g.n++; g.hi=Math.max(g.hi,m[2]); g.last=m[0]; g.v=m[1] }
-      else groups.push({px, v:m[1], n:1, hi:m[2], first:m[0], last:m[0]});
+      else groups.push({px, v0:m[1], v:m[1], n:1, hi:m[2], first:m[0], last:m[0]});
     }
     for(const g of groups){
-      const py=Y(g.v*k);
+      // sit ON the line, not floating above the chart. A burst is a near-vertical
+      // climb, so the midpoint of what it covers puts the bolt on that segment.
+      const py=Y(((g.v0+g.v)/2)*k);
       const when = g.n>1 ? `${fmtClock(g.first)}\u2013${fmtClock(g.last)}` : fmtClock(g.first);
       const what = g.n>1
         ? `${g.n} trainings over \u00d72 normal, biggest \u00d7${g.hi}`
         : `one training at \u00d7${g.hi} what the gym normally gives at their size`;
-      p+=`<text x="${g.px.toFixed(1)}" y="${(py-8).toFixed(1)}" text-anchor="middle" font-size="14" fill="${c}" style="cursor:help">`
-       + `\u26A1${g.n>1? `<tspan font-size="10" dy="-3">${g.n}</tspan>` : ""}`
-       + `<title>${esc(r.name)} \u2014 ${what}, ${when}</title></text>`;
+      const tip = `${esc(r.name)} \u2014 ${what}, ${when}`;
+      // the transparent disc is the tap target: a 14px glyph is far too small a
+      // thing to hit with a thumb
+      p+=`<g class="bolt" data-tip="${tip.replace(/"/g,"&quot;")}" style="cursor:pointer">`
+       + `<circle cx="${g.px.toFixed(1)}" cy="${py.toFixed(1)}" r="18" fill="transparent"/>`
+       + `<text x="${g.px.toFixed(1)}" y="${py.toFixed(1)}" text-anchor="middle" dominant-baseline="central"`
+       + ` font-size="20" fill="${c}" style="filter:drop-shadow(0 0 3px ${c}) drop-shadow(0 0 9px ${c})">`
+       + `\u26A1${g.n>1? `<tspan font-size="11" dy="-7" style="filter:none">${g.n}</tspan>` : ""}</text></g>`;
     }
   });
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
   svg.innerHTML=p;
+  bindBolts(svg);
   $("legend").innerHTML=rows.map((r,i)=>{
     const mine = me && r.id===me.id;
     return `<span class="${mine?"me":""}"><i style="background:${LINE_COLOURS[i%LINE_COLOURS.length]}"></i>${esc(r.name)}${mine?" (you)":""}</span>`;
