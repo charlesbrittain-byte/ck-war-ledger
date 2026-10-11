@@ -363,6 +363,7 @@ export default {
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
           cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
           gymE: u.gymE != null ? u.gymE : null, fromLog: !!u.fromLog,
+          logLost: !!u.logLost,
           // the audit column: gain per energy against par for their size. Only
           // meaningful where the energy is measured rather than estimated.
           vsPar: (u.gymE > 0 && u.first > 0 && g > 0)
@@ -805,7 +806,11 @@ const HAPPY_AT  = 1.75;        // ... and above this much of it is happy rather 
    energy can only hide a jump, it can never invent one. The cap and the jump
    flag both read this, so they cannot disagree about the same weekend. */
 function energyOf(doc, ev, uid, u, now){
-  if (u.gymE > 0) return u.gymE;
+  // A member who swaps to a key without the log leaves their last measured
+  // energy frozen while their gains keep climbing. Trusting it then would
+  // inflate their multiple and bite them with a cap they have not earned, so
+  // fall back to the estimate, which is deliberately generous.
+  if (u.gymE > 0 && !u.logLost) return u.gymE;
   const secs = Math.max(0, Math.min(ev.to, now) - (u.firstAt || ev.from));
   const xan = xanTaken(doc, ev, uid, u, now);
   const ref = Math.max(0, (u.ref || 0) - (u.firstR || 0));
@@ -1235,6 +1240,9 @@ async function tickTraining(env, t, atWar) {
     for (const [id, r] of Object.entries(reads)) {
       if (!inEvent(ev, id)) continue;
       let u = ev.users[id];
+      // their key used to carry the log and no longer does
+      if (u && u.fromLog && keys[id] && !keys[id].log) u.logLost = true;
+      else if (u && keys[id] && keys[id].log) delete u.logLost;
       if (!u) u = ev.users[id] = { name: keys[id].name, first: VAL_OF(r, ev.stat), firstAt: t, s: [],
                                    fs: r.stats || null };          // the baseline split, captured once
       else if (keys[id].name) u.name = keys[id].name;
