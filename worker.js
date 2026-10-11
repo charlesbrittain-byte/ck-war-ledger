@@ -337,7 +337,7 @@ export default {
         const ser = den > 0 ? (u.s || []).map(([ts, v]) => [ts, toY(v)]) : [];
         // the bolts: a single training that beat par by JUMP_MARK or more, put
         // through the same conversion so each one sits exactly on the line
-        const marks = den > 0 ? (u.jx || []).map(([ts, v, x, e]) => [ts, toY(v), x, e || 0]) : [];
+        const marks = den > 0 ? (u.jx || []).map(([ts, v, x, e, h]) => [ts, toY(v), x, e || 0, h == null ? x : h]) : [];
         // boards recorded by an older build lost their baseline timestamp from
         // the series, but firstAt still has it — put the anchor back
         if (ser.length && u.firstAt && ser[0][0] > u.firstAt) ser.unshift([u.firstAt, 0]);
@@ -386,7 +386,7 @@ export default {
                       board: boardFor(ev), keyTest: isAdmin ? (ev.keyTest || null) : null }));
       const first = events.find(e => e.open) || events[events.length - 1] || null;
       return json({ events, now, you: id || null, enrolled: enrolledMe, history,
-                    scoring: { k1: K1, k2: K2, a1: A1, a2: A2, a3: A3, capx: CAPX,
+                    scoring: { k1: K1, k2: K2, a1: A1, a2: A2, a3: A3, capx: CAPX, happyAt: HAPPY_AT,
                                tilt: TILT, ref: REF, floor: FLOOR,
                                parAt: PAR_AT, parT: PAR_T },
                     // what a page written before multiple events understands
@@ -735,7 +735,7 @@ const A3    = 0.34;         // measured slope above K2
 const REF   = 10000000;     // scale anchor only; moving it moves every score alike
 const TILT  = 0.02;         // the deliberate tilt against big players
 const FLOOR = 20000;        // damps the very bottom, below the measured range
-const CAPX  = 2.5;          // a weekend is scored as at most this many times par
+const CAPX  = 2.25;         // a weekend is scored as at most this many times par
 const PAR_AT = 126.62;      // measured gain per energy ...
 const PAR_T  = 12114816;    // ... at this total, the mid-range anchor
 
@@ -773,7 +773,8 @@ function denomOf(u){
    available can only hide a jump; it can never invent one. */
 const JUMP_PAR = parOf;        // the same measured curve the score uses
 const JUMP_AT = 2;             // below this it is ordinary training
-const JUMP_MARK = 2;           // a single training at this multiple gets a bolt on the chart
+const JUMP_MARK = 1.75;        // a single training at this multiple gets a bolt on the chart
+const HAPPY_AT  = 1.75;        // ... and above this much of it is happy rather than stat choice
 
 /* What they had to spend. Measured where the gym log gives it, estimated
    otherwise — and the estimate is pitched high on purpose: over-stating someone's
@@ -941,11 +942,20 @@ function fromSessions(sessions, nowStats, from){
   for (const g of sessions) {
     const par = parOf(run);
     const x = (g.energy > 0 && par > 0) ? (g.inc / g.energy) / par : 0;
+    /* Two different things make a training beat par, and they are not the same
+       achievement. Torn prices a gain off the SINGLE stat being trained, while
+       par here is priced off the total — so training your strongest stat beats
+       par on its own, with no happy involved. Price the same training against
+       par for a balanced player whose every stat matched the one being trained,
+       and what is left over is the part happy actually bought. */
+    const parStat = parOf(4 * g.before);
+    const sFac = parStat > 0 && par > 0 ? parStat / par : 1;        // the stat-choice share
+    const h = sFac > 0 ? x / sFac : x;                              // the happy share
     run += g.inc;
     series.push([g.t, +run.toFixed(2)]);
     // energy too: how much was spent at that multiple says more than how many
     // separate trainings it was split across
-    if (x >= JUMP_MARK) jumps.push([g.t, +run.toFixed(2), +x.toFixed(1), g.energy]);
+    if (x >= JUMP_MARK) jumps.push([g.t, +run.toFixed(2), +x.toFixed(1), g.energy, +h.toFixed(2)]);
   }
   // keep it to a sane size for the chart
   let s2 = series;

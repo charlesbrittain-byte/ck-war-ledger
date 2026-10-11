@@ -251,6 +251,11 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     training buys at your size. Anything above that still shows in full &mdash; your real gain, your real percentage and
     your real multiplier are all on the board untouched &mdash; but the score stops there, marked <span class="capped">capped</span>.
     Jumps are still well worth doing; one enormous one just cannot decide the whole event on its own.
+    <br><br><b>Marks on the graph.</b> A <b>&#9650;</b> is a burst explained by <b>training your strongest stat</b>
+    &mdash; Torn works a gain out from the single stat you train, not your total, so your best stat beats par on its
+    own with no happy at all. A <b>&#9889;</b> is a burst that stat choice <i>cannot</i> explain, which usually means
+    happy, though an FHC or just training while your happy is high looks the same from out here. Tap either for the
+    energy behind it and the split. Both are worth having; they are simply different tricks, and neither is cheating.
     <br><br>A <b>&#9889; multiplier</b> beside a name means that person gained several times more than the energy
     they got through can normally buy — which is what a happy jump looks like from the outside. It is shown for
     interest and <b>does not change anyone's score</b>; jumps are allowed. Nothing appears for ordinary training.
@@ -476,24 +481,35 @@ function drawChart(ev, now){
       const g=groups[groups.length-1];
       // the multiple is what matters, so a group carries the energy-weighted one
       // across everything in it, plus the energy that bought it
-      if(g && px-g.px < 14){ g.e+=e; g.wx+=m[2]*e; g.last=m[0]; g.v=m[1] }
-      else groups.push({px, v0:m[1], v:m[1], e, wx:m[2]*e, first:m[0], last:m[0]});
+      if(g && px-g.px < 14){ g.e+=e; g.wx+=m[2]*e; g.wh+=m[4]*e; g.last=m[0]; g.v=m[1] }
+      else groups.push({px, v0:m[1], v:m[1], e, wx:m[2]*e, wh:m[4]*e, first:m[0], last:m[0]});
     }
     for(const g of groups){
       const mult = g.e>0 ? g.wx/g.e : 0;
+      const hap  = g.e>0 ? g.wh/g.e : 0;            // the part happy bought
+      const stat = hap>0 ? mult/hap : 1;            // the part training a big stat bought
+      const happyLed = hap >= 1.75;
       // sit ON the line, not floating above the chart. A burst is a near-vertical
       // climb, so the midpoint of what it covers puts the bolt on that segment.
       const py=Y(((g.v0+g.v)/2)*k);
       const when = g.last>g.first ? `${fmtClock(g.first)}\u2013${fmtClock(g.last)}` : fmtClock(g.first);
-      const tip = `${esc(r.name)} \u2014 ${g.e.toLocaleString()} energy trained at \u00d7${mult.toFixed(1)} `
-                + `what the gym normally gives at their size, ${when}`;
+      /* Only one of these two is measured directly. Stat choice is: Torn prices a
+         gain off the stat you train, so we can work out exactly what training a
+         bigger one is worth. Whatever is left over is everything else — happy
+         most likely, but an FHC or simply training while happy is high looks the
+         same from out here. So it is not labelled as a jump. */
+      const why = happyLed
+        ? `\u00d7${hap.toFixed(2)} from happy or similar, \u00d7${stat.toFixed(2)} from training a bigger stat`
+        : `\u00d7${stat.toFixed(2)} from training a bigger stat, \u00d7${hap.toFixed(2)} from happy or similar`;
+      const tip = `${esc(r.name)} \u2014 ${g.e.toLocaleString()} energy at \u00d7${mult.toFixed(2)} `
+                + `what the gym normally gives at their size. ${why}. ${when}`;
       // the transparent disc is the tap target: a 14px glyph is far too small a
       // thing to hit with a thumb
       p+=`<g class="bolt" data-tip="${tip.replace(/"/g,"&quot;")}" style="cursor:pointer">`
        + `<circle cx="${g.px.toFixed(1)}" cy="${py.toFixed(1)}" r="18" fill="transparent"/>`
        + `<text x="${g.px.toFixed(1)}" y="${py.toFixed(1)}" text-anchor="middle" dominant-baseline="central"`
        + ` font-size="20" fill="${c}" style="filter:drop-shadow(0 0 3px ${c}) drop-shadow(0 0 9px ${c})">`
-       + `\u26A1</text></g>`;
+       + `${happyLed? "\u26A1" : "\u25B2"}</text></g>`;
     }
   });
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
