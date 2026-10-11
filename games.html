@@ -59,6 +59,14 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .bolt:hover text,.bolt:active text{animation:none; opacity:1}
 @keyframes boltPulse{0%,100%{opacity:.78} 50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.bolt text{animation:none}}
+.field{display:flex;height:30px;border-radius:8px;overflow:hidden;margin:12px 0 4px;
+  background:#0B0F13;border:1px solid var(--line);gap:2px;padding:2px}
+.field i{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-width:2px;border-radius:5px;font-style:normal;overflow:hidden;transition:filter .15s}
+.field i:hover{filter:brightness(1.18)}
+.field i.me{outline:1.5px solid #fff;outline-offset:-1.5px}
+.field i b{font-size:10px;font-weight:700;line-height:1;color:#0B0F13;white-space:nowrap;letter-spacing:.01em}
+.field i u{font-size:10px;text-decoration:none;line-height:1.3;color:#0B0F13;opacity:.72;font-weight:700}
 #board tr{transition:background .12s}
 #board tr:hover{background:#1A1F26}
 .capped{display:inline-block; margin-left:6px; padding:1px 5px; border-radius:4px; font-size:11px;
@@ -113,7 +121,9 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .pname{font-weight:700; font-size:15px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .pval{font-size:19px; font-weight:700; color:var(--up); margin-top:2px}
 .praw{font-size:12px; color:var(--faint)}
-/* a share-of-the-leader bar behind each score, like Torn's war bars */
+/* A bar behind each score, measured against the leader rather than against the
+   whole field — so first place always fills its cell and the rest read as "how
+   far behind". The segmented bar above the chart is the share-of-everyone one. */
 td.gain{position:relative}
 .barfill{position:absolute; left:0; top:5px; bottom:5px; border-radius:3px; z-index:0;
   background:linear-gradient(90deg,rgba(217,160,54,.30),rgba(217,160,54,.06))}
@@ -225,6 +235,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     <button id="autoKey" class="linkish" style="margin-left:14px">Use a different key</button>
     <button id="autoStop" class="linkish" style="margin-left:14px" hidden>Stop recording me</button>
   </div>
+  <div class="field" id="field" hidden></div>
   <svg id="chart" class="chart" preserveAspectRatio="none"></svg>
   <div class="legend" id="legend"></div>
   <div id="tip" hidden></div>
@@ -460,6 +471,34 @@ function reposition(){
 window.addEventListener("scroll", reposition, {passive:true});
 window.addEventListener("resize", reposition);
 
+/* Straight segments met at hard corners and the whole thing looked like a
+   sawtooth. This is a monotone cubic through the points: it flows, and because
+   it is monotone it cannot overshoot — a jump still goes straight up and a flat
+   stretch stays flat, so no curve claims a gain nobody made. */
+function flowPath(pts){
+  const n = pts.length;
+  if (n < 2) return n ? `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}` : "";
+  const dx = [], dy = [], m = [];
+  for (let i = 0; i < n-1; i++){ dx[i] = pts[i+1][0]-pts[i][0]; dy[i] = pts[i+1][1]-pts[i][1]; }
+  const sl = dx.map((d,i) => d === 0 ? 0 : dy[i]/d);
+  m[0] = sl[0]; m[n-1] = sl[n-2];
+  for (let i = 1; i < n-1; i++){
+    if (sl[i-1]*sl[i] <= 0) m[i] = 0;
+    else {
+      const w1 = 2*dx[i] + dx[i-1], w2 = dx[i] + 2*dx[i-1];
+      m[i] = (w1+w2) / (w1/sl[i-1] + w2/sl[i]);
+    }
+  }
+  let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  for (let i = 0; i < n-1; i++){
+    const h = dx[i]/3;
+    d += ` C ${(pts[i][0]+h).toFixed(1)} ${(pts[i][1]+m[i]*h).toFixed(1)}`
+       + ` ${(pts[i+1][0]-h).toFixed(1)} ${(pts[i+1][1]-m[i+1]*h).toFixed(1)}`
+       + ` ${pts[i+1][0].toFixed(1)} ${pts[i+1][1].toFixed(1)}`;
+  }
+  return d;
+}
+
 function drawChart(ev, now){
   // 1000x190 rendered about 4.5 times wider than tall once scaled into the
   // card, which squashed every line flat. This is nearer 3:1.
@@ -479,17 +518,17 @@ function drawChart(ev, now){
   const Y=v=>H-padB-(H-padT-padB)*(v/max);
   const UT=t=>new Date(t*1000);
 
-  let p=`<defs><linearGradient id="meFill" x1="0" y1="0" x2="0" y2="1">`
-      + `<stop offset="0%" stop-color="var(--amber,#E3A008)" stop-opacity=".20"/>`
+  let p=`<rect x="0" y="0" width="${W}" height="${H}" rx="10" fill="#07090C"/>`
+      + `<defs><linearGradient id="meFill" x1="0" y1="0" x2="0" y2="1">`
+      + `<stop offset="0%" stop-color="var(--amber,#E3A008)" stop-opacity=".18"/>`
       + `<stop offset="100%" stop-color="var(--amber,#E3A008)" stop-opacity="0"/></linearGradient></defs>`;
 
   // horizontal guides: dashed and quiet, so the lines are what you look at
   const step = max>60? 20 : max>30? 10 : max>12? 5 : 2;
   for(let g=0; g<=max; g+=step){
     const y=Y(g).toFixed(1);
-    p+=`<line x1="${padL}" x2="${W-padR}" y1="${y}" y2="${y}" stroke="#20262D" stroke-width="1" `
-     + `${g? 'stroke-dasharray="3 5"' : ''}/>`;
-    p+=`<text x="${padL-8}" y="${(Y(g)+4).toFixed(1)}" fill="#636C76" font-size="11" text-anchor="end">${g}%</text>`;
+    p+=`<line x1="${padL}" x2="${W-padR}" y1="${y}" y2="${y}" stroke="#151C24" stroke-width="1" />`;
+    p+=`<text x="${padL-8}" y="${(Y(g)+4).toFixed(1)}" fill="#5C6773" font-size="11" text-anchor="end">${g}%</text>`;
   }
 
   /* A time axis, which it never had. Without one the graph said nothing about
@@ -499,15 +538,15 @@ function drawChart(ev, now){
   const first = Math.ceil(from/(tick*3600))*(tick*3600);
   for(let t=first; t<=to; t+=tick*3600){
     const x=X(t).toFixed(1), dt=UT(t), midnight = dt.getUTCHours()===0;
-    p+=`<line x1="${x}" x2="${x}" y1="${padT}" y2="${H-padB}" stroke="${midnight? '#2E3640':'#1C2127'}" `
+    p+=`<line x1="${x}" x2="${x}" y1="${padT}" y2="${H-padB}" stroke="${midnight? '#27323E':'#121820'}" `
      + `stroke-width="1" ${midnight? '' : 'stroke-dasharray="2 6"'}/>`;
     const lbl = midnight ? dt.toUTCString().slice(0,3) : String(dt.getUTCHours()).padStart(2,"0");
-    p+=`<text x="${x}" y="${H-padB+15}" fill="${midnight? '#8A939D':'#5A626B'}" font-size="${midnight?11:10}" `
+    p+=`<text x="${x}" y="${H-padB+15}" fill="${midnight? '#8A939D':'#515B66'}" font-size="${midnight?11:10}" `
      + `text-anchor="middle">${lbl}</text>`;
   }
   p+=`<text x="${W-padR}" y="${H-padB+15}" fill="#636C76" font-size="10" text-anchor="end">TCT</text>`;
   // the baseline, drawn last of the furniture so it sits over the guides
-  p+=`<line x1="${padL}" x2="${W-padR}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" stroke="#39414B" stroke-width="1"/>`;
+  p+=`<line x1="${padL}" x2="${W-padR}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" stroke="#303a45" stroke-width="1"/>`;
 
   // colours are claimed in ranking order, so the leaders get the clearest ones
   assignColours(rows.slice().sort((a,b)=>sc(b)-sc(a)).map(r=>r.id));
@@ -517,15 +556,18 @@ function drawChart(ev, now){
     const c=colourFor(r.id);
     const mine = me && r.id===me.id;
     const pts=r.series.map(([t,v])=>[X(t),Y(v*k)]);
-    const d=pts.map((pt,j)=>(j?"L":"M")+pt[0].toFixed(1)+" "+pt[1].toFixed(1)).join(" ");
+    const d=flowPath(pts);
     // your own line gets a wash underneath it, so you can find yourself at a glance
     if(mine) p+=`<path d="${d} L ${pts[pts.length-1][0].toFixed(1)} ${Y(0).toFixed(1)} L ${pts[0][0].toFixed(1)} ${Y(0).toFixed(1)} Z" fill="url(#meFill)" stroke="none"/>`;
-    p+=`<path d="${d}" fill="none" stroke="${c}" stroke-width="${mine?3.4:2.2}" stroke-linejoin="round" stroke-linecap="round" opacity="${mine?1:.9}"`
-     + `${mine? ` style="filter:drop-shadow(0 0 6px ${c}66)"` : ""}/>`;
+    // the glow is a soft wide pass under a crisp one, rather than a blur filter
+    // on the line itself, which goes muddy where seven of them cross
+    p+=`<path d="${d}" fill="none" stroke="${c}" stroke-width="${mine?11:8}" stroke-linejoin="round" stroke-linecap="round" opacity=".13"/>`
+     + `<path d="${d}" fill="none" stroke="${c}" stroke-width="${mine?5.5:4}" stroke-linejoin="round" stroke-linecap="round" opacity=".22"/>`
+     + `<path d="${d}" fill="none" stroke="${c}" stroke-width="${mine?3.2:2.4}" stroke-linejoin="round" stroke-linecap="round"/>`;
     const last=pts[pts.length-1];
     if(last){
       // a halo in the page colour so dots that overlap still read as separate
-      p+=`<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="${mine?6:4.5}" fill="#12161A"/>`
+      p+=`<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="${mine?6.5:5}" fill="#07090C"/>`
        + `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="${mine?4:3}" fill="${c}">`
        + `<title>${esc(r.name)} ${(sc(r)*k).toFixed(1)}% of the room, raw +${r.gain.toFixed(2)}%</title></circle>`;
     }
@@ -563,11 +605,18 @@ function drawChart(ev, now){
                 + `what the gym normally gives at their size. ${why}. ${when}`;
       // the transparent disc is the tap target: a 14px glyph is far too small a
       // thing to hit with a thumb
+      /* These used to float above the line like stickers. A boost is something
+         that happened ON the line, so it is drawn as a node sitting in it: a
+         disc punched out of the chart, ringed in the member's colour, with the
+         mark inside. Bigger multiples get a bigger node, so a monster and a
+         modest one no longer look identical. */
+      const rad = Math.max(8, Math.min(14, 7 + mult*1.6));
       p+=`<g class="bolt" data-tip="${tip.replace(/"/g,"&quot;")}" style="cursor:pointer">`
-       + `<circle cx="${g.px.toFixed(1)}" cy="${py.toFixed(1)}" r="18" fill="transparent"/>`
+       + `<circle cx="${g.px.toFixed(1)}" cy="${py.toFixed(1)}" r="20" fill="transparent"/>`
+       + `<circle cx="${g.px.toFixed(1)}" cy="${py.toFixed(1)}" r="${(rad+3).toFixed(1)}" fill="${c}" opacity=".16"/>`
+       + `<circle cx="${g.px.toFixed(1)}" cy="${py.toFixed(1)}" r="${rad.toFixed(1)}" fill="#07090C" stroke="${c}" stroke-width="1.6"/>`
        + `<text x="${g.px.toFixed(1)}" y="${py.toFixed(1)}" text-anchor="middle" dominant-baseline="central"`
-       + ` font-size="20" fill="${c}" style="filter:drop-shadow(0 0 3px ${c}) drop-shadow(0 0 9px ${c})">`
-       + `${happyLed? "\u26A1" : "\u25B2"}</text></g>`;
+       + ` font-size="${(rad*1.05).toFixed(0)}" fill="${c}">${happyLed? "\u26A1" : "\u25B2"}</text></g>`;
     }
   });
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
@@ -743,6 +792,19 @@ function render(data){
     + (pz[n].id? `<img src="https://www.torn.com/images/items/${pz[n].id}/large.png" alt="" loading="lazy">` : "")
     + `<span><span class="pl">${label}</span><br><span class="pn">${esc(pz[n].name)}</span></span></div>`).join("");
   const STAT_NAME={s:"Strength",d:"Defence",p:"Speed",x:"Dexterity"};
+  /* The share number had a bar behind it whose width was relative to the LEADER,
+     while the number itself was a share of the whole field. Two different things
+     in one cell, which is why it read as a glowing smear. This is the honest
+     picture: one bar that IS the competition, cut into everyone's piece. */
+  const fpool = poolOf(rows);
+  const fieldRows = rows.filter(r=>sc(r)>0);
+  $("field").hidden = !fieldRows.length;
+  $("field").innerHTML = !fieldRows.length ? "" : fieldRows.map(r=>{
+    const pc = 100*sc(r)/fpool, mine = me && r.id===me.id;
+    return `<i style="width:${pc.toFixed(2)}%;background:${colourFor(r.id)}" class="${mine?"me":""}"`
+      + ` title="${esc(r.name)} — ${pc.toFixed(1)}% of everything scored so far">`
+      + `<b>${pc>=9? esc(r.name).slice(0,9) : ""}</b><u>${pc>=5? pc.toFixed(0)+"%" : ""}</u></i>`;
+  }).join("");
   $("statOnly").hidden = !ev.stat;
   $("statOnly").innerHTML = ev.stat
     ? `<b>${STAT_NAME[ev.stat]} only.</b> Only ${STAT_NAME[ev.stat].toLowerCase()} gains count this time, and only the `
@@ -783,7 +845,7 @@ function render(data){
       + (r.jump? `<span class="jump" title="Gained about ${r.jump} times more than the energy they used can normally buy — the signature of a happy jump. It does not affect the score.">&#9889;${r.jump}&times;</span>` : "")
       + `</td>`
       + `<td class="gain ${r.adj>0?"pos":"zero"}">`
-      + (r.adj>0? `<span class="barfill" style="width:${(100*shareOf(r,pool)/lead).toFixed(1)}%"></span>` : "")
+      + (r.adj>0? `<span class="barfill" style="width:${(100*shareOf(r,pool)/lead).toFixed(1)}%;background:${colourFor(r.id)}2E;border-left:2px solid ${colourFor(r.id)}"></span>` : "")
       + `<span class="barval">${r.adj>0? shareOf(r,pool).toFixed(1)+"%" : "—"}</span>`
       + (r.capped? `<span class="capped" title="${r.vsPar? "This weekend came to \u00d7"+r.vsPar.toFixed(2)+" of what ordinary training buys at this size, so it is scored as \u00d7"+capX+"." : "More than \u00d7"+capX+" of par, so it is scored as \u00d7"+capX+"."} The real gain, percentage and multiplier are all shown in full.">capped</span>` : "")
       + `</td>`
