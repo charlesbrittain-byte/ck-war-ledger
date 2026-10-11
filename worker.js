@@ -56,7 +56,8 @@ export default {
         const ev = { id: String(from) + "-" + Math.random().toString(36).slice(2, 6),
                      name: (url.searchParams.get("name") || "").slice(0, NAME_MAX),
                      from, to, users: {}, locked: false, archived: false, keyTest: null,
-                     prizes: readPrizes(url), roster: {} };
+                     prizes: readPrizes(url), roster: {},
+                     stat: readStat(url.searchParams.get("stat")) };
         doc.events.push(ev);
         doc.nextPoll = 0;
         await save();
@@ -69,6 +70,14 @@ export default {
         const ev = evOf(doc, url.searchParams.get("ev")) || doc.events[0];
         if (!ev) return json({ error: "there is no event to edit" }, 400, cors);
         if (url.searchParams.has("name")) ev.name = (url.searchParams.get("name") || "").slice(0, NAME_MAX);
+        if (url.searchParams.has("stat")) {
+          // changing which stat counts rewrites what every baseline means, so it
+          // is only allowed before anyone has been recorded
+          if (Object.keys(ev.users || {}).length) {
+            return json({ error: "people are already recorded — the stat can't change now" }, 400, cors);
+          }
+          ev.stat = readStat(url.searchParams.get("stat"));
+        }
         if (url.searchParams.has("prizes")) ev.prizes = readPrizes(url);   // "prizes=1" means these are the prizes
         if (url.searchParams.has("to")) {
           const to = +url.searchParams.get("to") || 0;
@@ -141,7 +150,7 @@ export default {
             // the stats as they were at the END of the event, not as they are now:
             // a stat untrained during the event may well have been trained since
             const endStats = u.ls || u.fs;
-            const rb = fromSessions(sess, endStats, ev.from);
+            const rb = fromSessions(sess, endStats, ev.from, ev.stat);
             if (!rb) { done.push({ ev: ev.id, name: u.name, skipped: "no per-stat reading to build on" }); continue }
             const was = { first: u.first, gymE: u.gymE || null };
             u.first = rb.first; u.fs = rb.fs; u.fsEst = false;
@@ -172,7 +181,7 @@ export default {
               if (!since) { added.push({ ev: ev.id, name: k.name, skipped: "could not rewind" }); continue }
               const end = { s: r.stats.s, d: r.stats.d, p: r.stats.p, x: r.stats.x };
               for (const g of since) end[STAT_KEY[g.stat]] -= g.inc;      // undo everything since the close
-              const rb = fromSessions(inWin, end, ev.from);
+              const rb = fromSessions(inWin, end, ev.from, ev.stat);
               if (!rb) { added.push({ ev: ev.id, name: k.name, skipped: "could not rebuild" }); continue }
               const last = rb.series[rb.series.length - 1][1];
               ev.users[id] = { name: k.name, first: rb.first, firstAt: ev.from, fs: rb.fs, fsEst: false,
@@ -218,13 +227,14 @@ export default {
             const r = await readMember(k.key, false);
             if (r && !r._error) {
               const upto = Math.min(ev.to, now);
-              const u = { name: k.name, first: r.total, firstAt: now, fs: r.stats || null,
-                          ls: r.stats || null, last: r.total, s: [[now, r.total]],
+              const v0 = VAL_OF(r, ev.stat);
+              const u = { name: k.name, first: v0, firstAt: now, fs: r.stats || null,
+                          ls: r.stats || null, last: v0, s: [[now, v0]],
                           maxE: k.maxE || 150 };
               if (k.log) {
                 const sess = await gymSessions(k.key, ev.from, upto);
                 if (sess && sess.length) {
-                  const rb = fromSessions(sess, r.stats, ev.from);
+                  const rb = fromSessions(sess, r.stats, ev.from, ev.stat);
                   if (rb) {
                     u.first = rb.first; u.fs = rb.fs; u.fsEst = false;
                     u.gymE = rb.energy; u.fromLog = true;
@@ -235,7 +245,7 @@ export default {
                   // sharing a log and not trained yet: the start of the event IS
                   // their baseline, so they are not counted as joining late
                   u.firstAt = ev.from; u.fromLog = true; u.gymE = 0;
-                  u.s = [[ev.from, r.total]];
+                  u.s = [[ev.from, v0]];
                 }
                 const xl = await xanaxFromLog(k.key, ev.from, upto);
                 if (xl != null) u.xanLog = xl;
@@ -315,21 +325,21 @@ export default {
           // baseline — a later drop is a real loss, not a new start
           if (!u) u = ev.users[id] = { name, first: total, firstAt: now, s: [], fs: read.stats || null };
           else u.name = name || u.name;
-          applyReading(u, now, read, num("maxe"));
+          applyReading(u, now, read, num("maxe"), ev.stat);
         }
         await save();
       }
 
       const boardFor = ev => Object.entries(ev.users || {}).map(([uid, u]) => {
         const g = (u.last || 0) - (u.first || 0);
-        const { d: den, tilt } = denomOf(u);
+        const { d: den, tilt } = denomOf(u, ev.stat);
         /* The line has to end where the score ends. The score is capped and the
            line was not, so a capped member's line ran clean off the top of the
            chart — past 100% of a board that only adds up to 100. Scale the whole
            line by however much the cap took off, which keeps its shape and lands
            the last point exactly on the score. */
         const capK = (() => {
-          const full = scoreOf(u, g), cut = scoreOf(u, g, energyOf(doc, ev, uid, u, now));
+          const full = scoreOf(u, g, 0, ev.stat), cut = scoreOf(u, g, energyOf(doc, ev, uid, u, now), ev.stat);
           return full > 0 ? cut / full : 1;
         })();
         // the chart follows the ranking, so it plots the adjusted score
@@ -345,10 +355,10 @@ export default {
         return {
           id: +uid, name: u.name,
           gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw %
-          adj: scoreOf(u, g, spent), exact: !!u.fs, split: !!u.ls, jump: jumpOf(doc, ev, uid, u, now),
+          adj: scoreOf(u, g, spent, ev.stat), exact: !!u.fs, split: !!u.ls, jump: jumpOf(doc, ev, uid, u, now),
           // whether the cap actually bit, so the page can say so rather than
           // leaving someone to wonder why a big number scored less than it looks
-          capped: (u.first > 0 && g > 0 && spent > 0 && g > CAPX * parOf(u.first) * spent) || false,
+          capped: (u.first > 0 && g > 0 && spent > 0 && g > CAPX * parOf(SIZE_OF(u, ev.stat)) * spent) || false,
           xan: xanTaken(doc, ev, uid, u, now), xanFromLog: u.xanLog != null,
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
           cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
@@ -356,7 +366,7 @@ export default {
           // the audit column: gain per energy against par for their size. Only
           // meaningful where the energy is measured rather than estimated.
           vsPar: (u.gymE > 0 && u.first > 0 && g > 0)
-                 ? +((g / u.gymE) / parOf(u.first)).toFixed(2) : null,
+                 ? +((g / u.gymE) / parOf(SIZE_OF(u, ev.stat))).toFixed(2) : null,
           marks,
           since: u.firstAt, updated: u.lastAt,
           lateBy: u.fromLog ? 0 : Math.max(0, u.firstAt - ev.from),
@@ -382,7 +392,7 @@ export default {
                       signedUp: ev.roster ? Object.keys(ev.roster).length : null,
                       youIn: ev.roster ? (id ? ev.roster[id] != null : false) : true,
                       open: now >= ev.from && now <= ev.to, locked: !!ev.locked,
-                      held: ev.held || null,
+                      held: ev.held || null, stat: ev.stat || null,
                       board: boardFor(ev), keyTest: isAdmin ? (ev.keyTest || null) : null }));
       const first = events.find(e => e.open) || events[events.length - 1] || null;
       return json({ events, now, you: id || null, enrolled: enrolledMe, history,
@@ -613,7 +623,7 @@ function finalBoard(doc, ev){
     const g = (u.last || 0) - (u.first || 0);
     return { id: +uid, name: u.name || "",
       gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw, kept for the detail view
-      adj: scoreOf(u, g, energyOf(doc, ev, uid, u, now)), exact: !!u.fs,
+      adj: scoreOf(u, g, energyOf(doc, ev, uid, u, now), ev.stat), exact: !!u.fs,
       xan: xanTaken(doc, ev, uid, u, now),
       refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
       cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)) };
@@ -752,9 +762,21 @@ function denomNeutral(T){ return REF * Math.exp(curve(T) - curve(REF)) }
 // Stat points per energy that ordinary training buys at this size.
 function parOf(T){ return PAR_AT / denomNeutral(PAR_T) * denomNeutral(T) }
 
-function denomOf(u){
-  const t = u.fs ? (u.fs.s || 0) + (u.fs.d || 0) + (u.fs.p || 0) + (u.fs.x || 0)
-                 : (u.first || 0);
+/* An event can be scored on one stat instead of all four — a speed weekend, a
+   defence weekend. When it is, everything about a member is that stat: their
+   baseline, their gain, their line, and the energy they spent ON that stat.
+   Their size, for the curve, is that stat counted four times — which is to ask
+   "what would a balanced player built entirely of this stat get for the same
+   energy". That makes a single-stat event FAIRER than an all-stat one, because
+   picking your strongest stat stops being a lever: everyone is on the same one. */
+const STAT_PICK = { s: "strength", d: "defence", p: "speed", x: "dexterity" };
+const readStat = v => (v && STAT_PICK[v]) ? v : null;
+const VAL_OF = (r, st) => st ? ((r.stats && r.stats[st]) || 0) : (r.total || 0);
+const SIZE_OF = (u, st) => st ? 4 * (u.first || 0)
+                              : (u.fs ? (u.fs.s||0)+(u.fs.d||0)+(u.fs.p||0)+(u.fs.x||0) : (u.first || 0));
+
+function denomOf(u, st){
+  const t = SIZE_OF(u, st);
   return { d: denomNeutral(t), tilt: Math.pow(REF / (t + FLOOR), TILT) };
 }
 
@@ -796,7 +818,7 @@ function jumpOf(doc, ev, uid, u, now){
   if (!(u.first > 0)) return null;
   const gain = (u.last || 0) - (u.first || 0);
   if (gain <= 0) return null;
-  const perEnergy = JUMP_PAR(u.first || 0);   // stat points per energy at their size
+  const perEnergy = JUMP_PAR(SIZE_OF(u, ev.stat));   // stat points per energy at their size
   if (perEnergy <= 0) return null;
   const implied = gain / perEnergy;
   const available = energyOf(doc, ev, uid, u, now);
@@ -812,12 +834,12 @@ function jumpOf(doc, ev, uid, u, now){
    across the weekend. Capping needs the energy, so in practice it needs a gym
    log; without one the energy is estimated, and that estimate is pitched high
    on purpose, so the cap is slow to bite for anyone not sharing. */
-function scoreOf(u, gain, energy){
-  const { d, tilt } = denomOf(u);
+function scoreOf(u, gain, energy, st){
+  const { d, tilt } = denomOf(u, st);
   if (!(d > 0)) return 0;
   let g = gain;
   if (energy > 0) {
-    const ceiling = CAPX * parOf(u.first || 0) * energy;
+    const ceiling = CAPX * parOf(SIZE_OF(u, st)) * energy;
     if (ceiling > 0 && g > ceiling) g = ceiling;
   }
   return +(100 * g / d * tilt).toFixed(3);
@@ -924,8 +946,29 @@ async function gymSessions(key, since, upto){
 // Rebuild someone's event from their log: where they started, and every step
 // since. `nowStats` is their latest per-stat reading, used for stats they have
 // not trained in this window — those are unchanged, so now IS the start.
-function fromSessions(sessions, nowStats, from){
+function fromSessions(sessions, nowStats, from, onlyStat){
   if (!nowStats) return null;
+  if (onlyStat) {
+    // one stat only: the trainings for it, the energy spent on it, nothing else
+    const ss = sessions.filter(g => STAT_KEY[g.stat] === onlyStat);
+    const base = ss.length ? ss[0].before : (nowStats[onlyStat] || 0);
+    let run = base;
+    const series = [[from, +base.toFixed(2)]];
+    const jumps = [];
+    for (const g of ss) {
+      // no stat-choice component to separate out here — everyone is on the same
+      // stat, so whatever beats par is happy or similar, full stop
+      const par = parOf(4 * g.before);
+      const x = (g.energy > 0 && par > 0) ? (g.inc / g.energy) / par : 0;
+      run += g.inc;
+      series.push([g.t, +run.toFixed(2)]);
+      if (x >= JUMP_MARK) jumps.push([g.t, +run.toFixed(2), +x.toFixed(1), g.energy, +x.toFixed(2)]);
+    }
+    let t2 = series;
+    while (t2.length > 220) t2 = t2.filter((_, i) => i % 2 === 0 || i >= t2.length - 60);
+    return { first: base, fs: null, series: t2, jumps,
+             energy: ss.reduce((a, g) => a + g.energy, 0) };
+  }
   const start = { s: nowStats.s, d: nowStats.d, p: nowStats.p, x: nowStats.x };
   const earliest = {};
   for (const g of sessions) if (!(g.stat in earliest)) earliest[g.stat] = g.before;
@@ -981,7 +1024,7 @@ async function psCat(key, cat){
 // a member *bought*: xanax at 250 each and energy refills at a full bar. Both
 // are lifetime counters, so the first reading inside the window is the zero and
 // everything after it is a delta. Natural regen is not counted — it cannot be.
-function applyReading(u, t, r, maxE){
+function applyReading(u, t, r, maxE, st){
   if (maxE) u.maxE = maxE;
   // NEVER set u.fs here: "no split on file yet" is not the same as "this is the
   // start". A record born before per-stat recording existed would otherwise
@@ -1009,13 +1052,14 @@ function applyReading(u, t, r, maxE){
     u.ref = r.cons.ref; u.drk = r.cons.drk; u.xan = r.cons.xan;
     u.fullAt = t;
   }
-  u.last = r.total; u.lastAt = t;
+  const nowVal = VAL_OF(r, st);
+  u.last = nowVal; u.lastAt = t;
   if (u.fromLog) {                      // the log stops at the last session; carry it to now
     const last = u.s[u.s.length - 1];
-    if (!last || last[1] !== r.total) u.s.push([t, r.total]); else last[0] = t;
+    if (!last || last[1] !== nowVal) u.s.push([t, nowVal]); else last[0] = t;
     return true;
   }
-  return pushSample(u, t, r.total);
+  return pushSample(u, t, nowVal);
 }
 
 // Read a member: battle stats always, the four consumable counters only when
@@ -1149,17 +1193,17 @@ async function tickTraining(env, t, atWar) {
       if (!inEvent(ev, id) || !r.gymKey) continue;
       const upto = Math.min(ev.to, t);
       const sess = await gymSessions(r.gymKey, ev.from, upto);
-      if (sess) r.rebuilt = fromSessions(sess, r.stats, ev.from);
+      if (sess) r.rebuilt = fromSessions(sess, r.stats, ev.from, ev.stat);
       const xl = await xanaxFromLog(r.gymKey, ev.from, upto);
       if (xl != null) r.xanLog = xl;
     }
     for (const [id, r] of Object.entries(reads)) {
       if (!inEvent(ev, id)) continue;
       let u = ev.users[id];
-      if (!u) u = ev.users[id] = { name: keys[id].name, first: r.total, firstAt: t, s: [],
+      if (!u) u = ev.users[id] = { name: keys[id].name, first: VAL_OF(r, ev.stat), firstAt: t, s: [],
                                    fs: r.stats || null };          // the baseline split, captured once
       else if (keys[id].name) u.name = keys[id].name;
-      applyReading(u, t, r, keys[id].maxE);
+      applyReading(u, t, r, keys[id].maxE, ev.stat);
     }
   }
 

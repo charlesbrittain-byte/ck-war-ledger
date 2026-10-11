@@ -482,6 +482,14 @@ details.settings summary{cursor:pointer}
   <div class="zoomrow">
     <span class="lbl">Name</span>
     <input id="evName" placeholder="Training weekend" style="min-width:150px" maxlength="80">
+    <span class="lbl">Counts</span>
+    <select id="evStat" title="Score the whole battle-stat total, or run it on one stat only — a speed weekend, a defence weekend. Can only be set before anyone is recorded.">
+      <option value="">all four stats</option>
+      <option value="s">strength only</option>
+      <option value="d">defence only</option>
+      <option value="p">speed only</option>
+      <option value="x">dexterity only</option>
+    </select>
     <span class="lbl">From</span>
     <input type="datetime-local" id="evFrom">
     <span class="lbl">to</span>
@@ -2843,6 +2851,7 @@ const prizeId=name=>{ const f=PRIZE_ITEMS.find(i=>i.n.toLowerCase()===(name||"")
 const prizeParams=()=>{ const o={prizes:1};
   for(const n of [1,2,3]){ const v=($("evP"+n).value||"").trim(); if(v) o["p"+n]=prizeId(v)+":"+v }
   return o };
+const statParam=()=>({ stat: $("evStat").value || "" });
 /* The roll of everyone who has handed over a key. Deliberately independent of
    the event card: it should be there whether or not an event exists, and it was
    not, because it was being drawn from inside renderEvent. */
@@ -2919,6 +2928,10 @@ function renderEvent(j){
   const state = now<ev.from? "opens "+fmtDT(ev.from) : now>ev.to? "finished "+fmtDT(ev.to) : "running until "+fmtDT(ev.to);
   $("evMeta").textContent=(ev.name? ev.name+" · ":"")+state;
   $("evName").value=ev.name||"";
+  $("evStat").value=ev.stat||"";
+  // once anybody is on the board the stat is locked: changing it would rewrite
+  // what every baseline means
+  $("evStat").disabled = !!(ev.board && ev.board.length);
   const pz=ev.prizes||{};
   for(const n of [1,2,3]) $("evP"+n).value = pz[n]? pz[n].name : "";
   $("evPzNote").textContent = Object.keys(pz).length? "" : "optional — members only see the places you fill in";
@@ -3033,7 +3046,7 @@ $("evClose").onclick=async()=>{
 $("evEdit").onclick=async()=>{
   const f=$("evFrom").value, t=$("evTo").value;
   if(!t){ $("evProg").textContent="pick an end time"; return }
-  const q={edit:1, ev:evPicked, to:Math.floor(new Date(t+"Z").getTime()/1000), name:$("evName").value.trim(), ...prizeParams()};
+  const q={edit:1, ev:evPicked, to:Math.floor(new Date(t+"Z").getTime()/1000), name:$("evName").value.trim(), ...prizeParams(), ...statParam()};
   if(f) q.from=Math.floor(new Date(f+"Z").getTime()/1000);   // refused by the worker once it has started
   $("evEdit").disabled=true; $("evProg").textContent="saving…";
   try{
@@ -3047,7 +3060,7 @@ $("evEdit").onclick=async()=>{
   }catch(e){
     // moving the start of a running event is refused; the rest still applied
     if(/already started/.test(e.message)){
-      try{ await evCall({edit:1, ev:evPicked, to:q.to, name:q.name, ...prizeParams()}); renderEvent(await evCall({hist:1}));
+      try{ await evCall({edit:1, ev:evPicked, to:q.to, name:q.name, ...prizeParams(), ...statParam()}); renderEvent(await evCall({hist:1}));
            $("evProg").textContent="saved (the start can't move now)" }
       catch(e2){ $("evProg").textContent=e2.message }
     } else $("evProg").textContent=e.message;
@@ -3062,7 +3075,7 @@ $("evSave").onclick=async()=>{
   if(!confirm("Open another event? It runs alongside anything already going, with its own board.")) return;
   $("evSave").disabled=true; $("evProg").textContent="saving…";
   try{
-    const made=await evCall({set:1, from, to, name:$("evName").value.trim(), ...prizeParams()});
+    const made=await evCall({set:1, from, to, name:$("evName").value.trim(), ...prizeParams(), ...statParam()});
     evPicked = made && made.event && made.event.id;
     renderEvent(await evCall({hist:1}));
     $("evProg").textContent="open";

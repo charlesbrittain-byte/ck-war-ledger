@@ -98,6 +98,7 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .tile b{display:block; font-size:21px; line-height:1.15; color:var(--text)}
 .tile span{display:block; font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; margin-top:2px}
 /* the top three as a podium, the way a war page shows a result */
+.statonly{border:1px solid var(--amber); border-radius:8px; padding:8px 10px; margin:10px 0}
 .held{border:1px solid var(--warn,#b8860b); border-radius:8px; padding:8px 10px; margin:10px 0}
 .podium{display:flex; gap:9px; align-items:flex-end; margin:12px 0 4px}
 .pod{flex:1; text-align:center; border:1px solid var(--line); border-radius:7px; padding:9px 7px 10px;
@@ -208,6 +209,7 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     <button id="refresh" class="linkish">Refresh now</button>
     <span class="meta" id="status"></span>
   </div>
+  <p class="hint statonly" id="statOnly" hidden></p>
   <p class="hint held" id="heldNote" hidden></p>
   <div class="podium" id="podium" hidden></div>
   <div id="error" class="err" hidden></div>
@@ -740,6 +742,14 @@ function render(data){
       `<div class="prize p${n}">`
     + (pz[n].id? `<img src="https://www.torn.com/images/items/${pz[n].id}/large.png" alt="" loading="lazy">` : "")
     + `<span><span class="pl">${label}</span><br><span class="pn">${esc(pz[n].name)}</span></span></div>`).join("");
+  const STAT_NAME={s:"Strength",d:"Defence",p:"Speed",x:"Dexterity"};
+  $("statOnly").hidden = !ev.stat;
+  $("statOnly").innerHTML = ev.stat
+    ? `<b>${STAT_NAME[ev.stat]} only.</b> Only ${STAT_NAME[ev.stat].toLowerCase()} gains count this time, and only the `
+      + `energy you spend on ${STAT_NAME[ev.stat].toLowerCase()} &mdash; train anything else and it simply does not `
+      + `register either way. Everyone is on the same stat, so picking your strongest is not a lever here: it is `
+      + `purely energy in and how well you spend it.`
+    : "";
   $("updated").textContent = "updated " + fmtClock(now||Math.floor(Date.now()/1000));
 
   const scored = rows.filter(r=>r.adj>0);
