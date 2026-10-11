@@ -499,6 +499,9 @@ details.settings summary{cursor:pointer}
     <button id="evRebuild">Pull in late logs</button>
     <button id="evClose">Close it</button>
     <button id="evSave" class="primary">Open another</button>
+    <span class="lbl" style="margin-left:10px">Halloween</span>
+    <button id="evHwTest" title="A short attack competition to try the machinery out. Starts now, runs two days.">Test it</button>
+    <button id="evHween" title="The real one: 27 Oct 14:00 to 3 Nov 12:00 TCT, scored on attacks won.">Start the real one</button>
     <span class="meta" id="evProg"></span>
   </div>
   <p class="hint" style="margin-top:6px"><b>Several events can run at once</b> — the chips above switch between them,
@@ -3034,6 +3037,31 @@ $("evRebuild").onclick=async()=>{
     renderEvent(await evCall({hist:1}));
   }catch(e){ $("evProg").textContent=e.message }
   finally{ $("evRebuild").disabled=false; setTimeout(()=>$("evProg").textContent="",15000) }
+};
+/* The Halloween game is an attack competition rather than a gym one: a point a
+   door, hourly jobs worth ten more, one winner per faction. Both buttons open
+   the same kind of event, one dated for the real thing and one for trying it. */
+async function openAttackEvent(name, from, to){
+  $("evProg").textContent="opening…";
+  try{
+    await evCall({set:1, kind:"attack", from, to, name});
+    renderEvent(await evCall({hist:1}));
+    $("evProg").textContent="open — it reads the faction attack log from here on";
+  }catch(e){ $("evProg").textContent=e.message }
+  setTimeout(()=>$("evProg").textContent="",8000);
+}
+$("evHwTest").onclick=()=>{
+  if(!confirm("Open a two-day attack competition starting now, to try the machinery?")) return;
+  const now=Math.floor(Date.now()/1000);
+  openAttackEvent("Halloween test run", now, now+2*86400);
+};
+$("evHween").onclick=()=>{
+  // Torn has shifted these dates before, so they are worth a glance each year
+  const from=Date.UTC(new Date().getUTCFullYear(),9,27,14,0)/1000;
+  const to  =Date.UTC(new Date().getUTCFullYear(),10,3,12,0)/1000;
+  const f=new Date(from*1000).toUTCString().slice(5,17), t=new Date(to*1000).toUTCString().slice(5,17);
+  if(!confirm("Open the real Halloween competition?\n\n"+f+" 14:00 to "+t+" 12:00 TCT.\nCheck Torn's news first — the dates move some years.")) return;
+  openAttackEvent("Trick or Treat", from, to);
 };
 $("evClose").onclick=async()=>{
   if(!evPicked) return;

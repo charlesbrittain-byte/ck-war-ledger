@@ -57,7 +57,8 @@ export default {
                      name: (url.searchParams.get("name") || "").slice(0, NAME_MAX),
                      from, to, users: {}, locked: false, archived: false, keyTest: null,
                      prizes: readPrizes(url), roster: {},
-                     stat: readStat(url.searchParams.get("stat")) };
+                     stat: readStat(url.searchParams.get("stat")),
+                     kind: url.searchParams.get("kind") === "attack" ? "attack" : "gym" };
         doc.events.push(ev);
         doc.nextPoll = 0;
         await save();
@@ -278,9 +279,23 @@ export default {
           // A custom key can grant `log` without being a Full key. info.log is
           // null either way — the marker is whether "log" is in the selections.
           keys[id].log = await hasLog(k);
+          /* An attack competition needs one key per faction that can read that
+             faction's attack log, and one such key covers every member of it.
+             Rather than ask anyone to register a key as a faction key, notice
+             when somebody hands one over and remember whose faction it opens. */
+          const fac = await factionKeyFor(k);
+          keys[id].fac = fac ? fac.id : null;
+          keys[id].facName = fac ? fac.name : null;
+          if (fac) {
+            doc.facKeys = doc.facKeys || {};
+            doc.facKeys[fac.id] = { id: String(id), name: keys[id].name, facName: fac.name,
+                                    at: Math.floor(Date.now() / 1000) };
+            await save();
+          }
         }
         await env.LEDGER.put("trainkeys", JSON.stringify(keys));
-        return json({ ok: true, enrolled: !!keys[id] }, 200, cors);
+        return json({ ok: true, enrolled: !!keys[id],
+                      faction: keys[id] ? (keys[id].facName || null) : null }, 200, cors);
       }
       if (url.searchParams.has("unbank")) {       // leaders: drop one archived event
         if (!isAdmin) return json({ error: "leaders only" }, 403, cors);
@@ -329,6 +344,27 @@ export default {
         }
         await save();
       }
+
+      /* An attack event keeps its own shape: doors rather than percentages, and
+         an hourly job log with one winner per faction. */
+      const attackBoard = ev => {
+        const rows = Object.entries((ev.atk && ev.atk.u) || {}).map(([uid, u]) => ({
+          id: +uid, name: u.name, fac: u.fac, facName: (fkName[u.fac] || null),
+          doors: (u.won || 0) + (u.bonus || 0), won: u.won || 0, bonus: u.bonus || 0,
+          hours: u.hours || 0, tried: (u.won || 0) + (u.lost || 0),
+          mugs: u.mugs || 0, hosp: u.hosp || 0, resp: +(u.resp || 0).toFixed(2),
+          tall: u.tall || 0, energy: ((u.won || 0) + (u.lost || 0)) * 25
+        }));
+        rows.sort((a, b) => b.doors - a.doors || b.resp - a.resp);
+        const hours = Object.entries((ev.atk && ev.atk.jobs) || {})
+          .map(([h, j]) => ({ h: +h, job: j.n, desc: j.d,
+            winners: Object.entries(j.w || {}).map(([fac, w]) =>
+              ({ fac: +fac, facName: fkName[fac] || null, name: w.name, at: w.at, tgt: w.tgt, lvl: w.lvl })) }))
+          .sort((a, b) => b.h - a.h).slice(0, 48);
+        return { rows, hours };
+      };
+      const fkName = {};
+      for (const [fid, v] of Object.entries(doc.facKeys || {})) fkName[fid] = v.facName || null;
 
       const boardFor = ev => Object.entries(ev.users || {}).map(([uid, u]) => {
         const g = (u.last || 0) - (u.first || 0);
@@ -395,10 +431,18 @@ export default {
                       signedUp: ev.roster ? Object.keys(ev.roster).length : null,
                       youIn: ev.roster ? (id ? ev.roster[id] != null : false) : true,
                       open: now >= ev.from && now <= ev.to, locked: !!ev.locked,
-                      held: ev.held || null, stat: ev.stat || null,
-                      board: boardFor(ev), keyTest: isAdmin ? (ev.keyTest || null) : null }));
+                      held: ev.held || null, stat: ev.stat || null, kind: ev.kind || "gym",
+                      board: ev.kind === "attack" ? [] : boardFor(ev),
+                      attack: ev.kind === "attack" ? attackBoard(ev) : null,
+                      nextJob: ev.kind === "attack"
+                        ? (() => { const h = Math.floor(now / 3600) * 3600, j = jobFor(ev, h);
+                                   return { from: h, to: h + 3600, job: j.n, desc: j.d } })()
+                        : null,
+                      keyTest: isAdmin ? (ev.keyTest || null) : null }));
       const first = events.find(e => e.open) || events[events.length - 1] || null;
       return json({ events, now, you: id || null, enrolled: enrolledMe, history,
+                    facKeys: Object.entries(doc.facKeys || {}).map(([fid, v]) =>
+                      ({ fac: +fid, facName: v.facName, by: v.name })),
                     scoring: { k1: K1, k2: K2, a1: A1, a2: A2, a3: A3, capx: CAPX, happyAt: HAPPY_AT,
                                tilt: TILT, ref: REF, floor: FLOOR,
                                parAt: PAR_AT, parT: PAR_T },
@@ -409,6 +453,30 @@ export default {
     }
 
     if (!isAdmin) return json({ error: "bad or missing token" }, 403, cors);
+
+    /* Run the attack pass now rather than waiting on the cron. Useful while
+       setting a competition up, and it reports what it found instead of
+       swallowing it the way the scheduled run does. */
+    if (url.pathname.endsWith("/runattacks")) {
+      try {
+        const t = Math.floor(Date.now() / 1000);
+        const doc = migrate(await env.LEDGER.get("train", "json")) || { events: [] };
+        const live = (doc.events || []).filter(e => e.kind === "attack" && t >= e.from && !e.locked);
+        if (!live.length) return json({ ran: false, why: "no attack event is open" }, 200, cors);
+        doc.atkPoll = 0;
+        // &reset=1 re-reads the whole event from its start, for when the shape
+        // of what we read has changed under us
+        if (url.searchParams.has("reset")) for (const e of live) delete e.atk;
+        await tickAttacks(env, doc, t);
+        await env.LEDGER.put("train", JSON.stringify(doc));
+        return json({ ran: true, facKeys: doc.facKeys || {},
+          events: live.map(e => ({ name: e.name, rows: Object.keys((e.atk && e.atk.u) || {}).length,
+                                   hours: Object.keys((e.atk && e.atk.jobs) || {}).length,
+                                   cur: e.atk && e.atk.cur })) }, 200, cors);
+      } catch (err) {
+        return json({ ran: false, error: String(err && err.message || err), stack: String(err && err.stack || "").slice(0, 400) }, 200, cors);
+      }
+    }
 
     if (url.pathname.endsWith("/snaps")) {
       const facId = url.searchParams.get("fac");
@@ -643,6 +711,46 @@ async function archiveEvent(env, doc, ev){
   h.events = h.events.slice(0, HIST_MAX);
   await env.LEDGER.put(HIST_KEY, JSON.stringify(h));
   return true;
+}
+
+/* ---------------- the hourly jobs ----------------
+   A small job drops on the hour. First member of each faction to land it takes
+   it for their side, so a joint event has one winner per faction rather than
+   one overall — otherwise the bigger faction takes nearly every hour.
+
+   Every job is decided from the attack log alone, so nothing is reported or
+   trusted. Each is rated by how often it already happens in real attacks, and
+   the reachable ones are listed three times so they come round three times as
+   often. Nothing here can be walled off by size: "beat someone level 90 or
+   over" was cut for exactly that reason, after the log showed no smaller member
+   had ever once managed it. */
+const JOB_BONUS = 10;          // flat doors, not a multiplier
+const JOB_RUN_MAX = 3;         // wins in a row before you are skipped
+
+const JOBS = [
+  { k: "leave",  n: "Leave them be",    d: "Beat someone and leave them standing",       f: a => a.res === "Attacked" },
+  { k: "weight", n: "Punch your weight", d: "Beat someone no more than 10 levels below you",
+                 f: (a, lv) => lv ? a.lvl >= lv - 10 : false },
+  { k: "long",   n: "A long name",      d: "Beat someone with a name 12 letters or longer", f: a => (a.def || "").length >= 12 },
+  { k: "digit",  n: "Numbers game",     d: "Beat someone with a digit in their name",    f: a => /\d/.test(a.def || "") },
+  { k: "round",  n: "Round number",     d: "Beat someone whose level is a multiple of 10", f: a => a.lvl > 0 && a.lvl % 10 === 0 },
+  { k: "mug",    n: "Sticky fingers",   d: "Mug someone",                                f: a => a.res === "Mugged" },
+  { k: "teens",  n: "Double figures",   d: "Beat someone between level 10 and 19",       f: a => a.lvl >= 10 && a.lvl <= 19 },
+  { k: "resp",   n: "Big game",         d: "One hit worth 10 respect or more",           f: a => a.rg >= 10 },
+  { k: "away",   n: "Passport",         d: "Beat someone who is overseas",               f: a => a.over },
+  { k: "three",  n: "Unlucky for some", d: "Beat someone whose level ends in 3",          f: a => a.lvl > 0 && a.lvl % 10 === 3 },
+  { k: "hosp",   n: "Lights out",       d: "Put someone in hospital",                    f: a => a.res === "Hospitalized" }
+];
+const CORE = ["leave","weight","long","digit","round","mug","teens"];
+const POOL = [];
+for (const j of JOBS) { POOL.push(j); if (CORE.includes(j.k)) { POOL.push(j); POOL.push(j) } }
+
+// deterministic, so the same hour always draws the same job and anyone can check it
+function jobFor(ev, hour){
+  let h = 2166136261;
+  const seed = String(ev.id) + ":" + hour;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619) }
+  return POOL[Math.abs(h) % POOL.length];
 }
 
 /* ---------------- scoring ----------------
@@ -908,6 +1016,23 @@ const STAT_KEY = { strength: "s", defense: "d", speed: "p", dexterity: "x" };
 
 // Whether a key can read logs. Stored at sign-up, and filled in on the next
 // poll for anyone who enrolled before this existed.
+/* Does this key open a faction's attack log, and whose? Returns null when it
+   cannot — which is the common case, and not a problem: only one person per
+   faction needs one. */
+async function factionKeyFor(key){
+  try {
+    const probe = await (await fetch("https://api.torn.com/v2/faction/attacks?limit=1&key="
+      + encodeURIComponent(key) + "&comment=CKClubhouse")).json();
+    if (!probe || probe.error) return null;
+    const who = await (await fetch("https://api.torn.com/user/?selections=basic&key="
+      + encodeURIComponent(key) + "&comment=CKClubhouse")).json();
+    const f = who && who.faction;
+    const fid = f && (f.faction_id || f.ID || f.id);
+    if (!fid) return null;
+    return { id: fid, name: f.faction_name || f.name || "" };
+  } catch (e) { return null }
+}
+
 async function hasLog(key){
   try {
     const ki = await (await fetch("https://api.torn.com/v2/key/info?key=" + encodeURIComponent(key))).json();
@@ -1153,6 +1278,144 @@ function pushSample(u, t, total){
   return true;
 }
 
+/* ---------------- attack events ----------------
+   One key per faction reads that faction's whole attack log, so two keys cover
+   a joint event. Members are attributed by the attacker's faction, which also
+   means somebody who leaves mid-event keeps what they already did. */
+const WON = new Set(["Mugged", "Hospitalized", "Attacked", "Special"]);
+
+function normAttack(a, facId){
+  const att = a.attacker, def = a.defender || {};
+  if (!att || !att.faction || att.faction.id !== facId) return null;   // ours, outgoing only
+  const m = a.modifiers || {};
+  return {
+    id: a.id != null ? String(a.id) : a.code,
+    t: a.ended || a.started, uid: String(att.id), name: att.name, fac: facId,
+    def: def.name || "", lvl: +(def.level || 0), res: a.result || "",
+    rg: +(a.respect_gain ?? a.respect ?? 0), over: (+m.overseas || 1) > 1
+  };
+}
+
+async function pullAttacks(env, keys, facId, holderId, since, upto){
+  // holderId "env" means the worker's own key, which already reads our faction
+  const k = holderId === "env" ? { key: env.TORN_API_KEY } : keys[holderId];
+  if (!k || !k.key) return null;
+  const out = []; const seen = new Set();
+  let cursor = upto;
+  for (let page = 0; page < 4; page++) {
+    let j;
+    try {
+      j = await (await fetch("https://api.torn.com/v2/faction/attacks?limit=100&sort=DESC"
+        + "&from=" + since + "&to=" + cursor + "&key=" + encodeURIComponent(k.key) + "&comment=CKClubhouse")).json();
+    } catch (e) { return null }
+    if (!j || j.error) return null;
+    const list = Object.values(j.attacks || {});
+    if (!list.length) break;
+    let oldest = Infinity;
+    for (const a of list) {
+      const when = a.ended || a.started;
+      oldest = Math.min(oldest, when);
+      const n = normAttack(a, facId);
+      if (n && !seen.has(n.id) && n.t >= since && n.t <= upto) { seen.add(n.id); out.push(n) }
+    }
+    if (list.length < 100 || oldest <= since) break;
+    cursor = oldest - 1;
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+/* Its own pass rather than riding on the gym tick, which bails out early when no
+   gym event is running. Polled every five minutes, not every two: the free KV
+   tier allows a thousand writes a day and the gym side already uses about 620. */
+const ATK_EVERY = 300;
+async function tickAttackEvents(env, t){
+  const doc = migrate(await env.LEDGER.get("train", "json"));
+  if (!doc || !(doc.events || []).some(e => e.kind === "attack" && t >= e.from && !e.locked)) return;
+  if (doc.atkPoll && t < doc.atkPoll) return;
+  const before = JSON.stringify((doc.events || []).map(e => e.atk || 0));
+  await tickAttacks(env, doc, t);
+  doc.atkPoll = t + ATK_EVERY;
+  if (JSON.stringify((doc.events || []).map(e => e.atk || 0)) !== before)
+    await env.LEDGER.put("train", JSON.stringify(doc));
+}
+
+async function tickAttacks(env, doc, t){
+  const live = (doc.events || []).filter(e => e.kind === "attack" && t >= e.from && !e.locked);
+  if (!live.length) return;
+  const keys = (await env.LEDGER.get("trainkeys", "json")) || {};
+  doc.facKeys = doc.facKeys || {};
+  /* Our own faction needs nobody to do anything: the worker's key already reads
+     it. Work out which faction that is once, and record it like any other. */
+  if (!Object.values(doc.facKeys).some(v => v.id === "env")) {
+    try {
+      // torn() talks to v2, where it is /faction/basic rather than ?selections=
+      const me = await torn(env, "/faction/basic");
+      const b = (me && (me.basic || me)) || {};
+      const fid = b.id || b.ID;
+      if (fid) doc.facKeys[fid] = { id: "env", name: "the tracker",
+                                    facName: b.name || "", at: t };
+    } catch (e) { /* carry on with whatever keys we do have */ }
+  }
+  const fk = doc.facKeys;
+  if (!Object.keys(fk).length) return;
+
+  for (const ev of live) {
+    ev.atk = ev.atk || { cur: 0, u: {}, jobs: {}, run: {} };
+    const since = Math.max(ev.from, ev.atk.cur ? ev.atk.cur - 300 : ev.from);   // small overlap
+    const upto = Math.min(ev.to, t);
+    let fresh = [];
+    for (const [facId, holder] of Object.entries(fk)) {
+      const got = await pullAttacks(env, keys, +facId, holder.id, since, upto);
+      if (got) fresh = fresh.concat(got);
+    }
+    if (!fresh.length) { ev.atk.cur = upto; continue }
+    fresh.sort((a, b) => a.t - b.t);
+
+    const seenIds = new Set(ev.atk.ids || []);
+    for (const a of fresh) {
+      if (seenIds.has(a.id)) continue;
+      seenIds.add(a.id);
+      const u = ev.atk.u[a.uid] || (ev.atk.u[a.uid] = { name: a.name, fac: a.fac,
+        won: 0, lost: 0, mugs: 0, hosp: 0, resp: 0, tall: 0, hours: 0, bonus: 0, lv: 0 });
+      u.name = a.name; u.fac = a.fac;
+      if (WON.has(a.res)) {
+        u.won++; u.resp += a.rg;
+        if (a.res === "Mugged") u.mugs++;
+        if (a.res === "Hospitalized") u.hosp++;
+        if (a.lvl > u.tall) u.tall = a.lvl;
+      } else u.lost++;
+    }
+    ev.atk.ids = [...seenIds].slice(-4000);
+
+    // settle every complete hour we have not settled yet
+    const firstHour = Math.floor(ev.from / 3600) * 3600;
+    for (let h = firstHour; h + 3600 <= upto; h += 3600) {
+      if (ev.atk.jobs[h]) continue;
+      const job = jobFor(ev, h);
+      const inHour = fresh.filter(a => a.t >= h && a.t < h + 3600 && WON.has(a.res));
+      const winners = {};
+      for (const a of inHour.sort((x, y) => x.t - y.t)) {
+        if (winners[a.fac]) continue;                               // one per faction
+        if ((ev.atk.run[a.uid] || 0) >= JOB_RUN_MAX) continue;      // sat out after three
+        const lv = (ev.atk.u[a.uid] || {}).lv || 0;
+        let ok = false;
+        try { ok = job.f(a, lv) } catch (e) { ok = false }
+        if (!ok) continue;
+        winners[a.fac] = { uid: a.uid, name: a.name, at: a.t, tgt: a.def, lvl: a.lvl };
+      }
+      ev.atk.jobs[h] = { k: job.k, n: job.n, d: job.d, w: winners };
+      const tookIt = new Set(Object.values(winners).map(w => w.uid));
+      for (const uid of Object.keys(ev.atk.u)) {
+        if (tookIt.has(uid)) {
+          ev.atk.run[uid] = (ev.atk.run[uid] || 0) + 1;
+          ev.atk.u[uid].hours++; ev.atk.u[uid].bonus += JOB_BONUS;
+        } else ev.atk.run[uid] = 0;
+      }
+    }
+    ev.atk.cur = upto;
+  }
+}
+
 async function tickTraining(env, t, atWar) {
   const doc = migrate(await env.LEDGER.get("train", "json"));
   if (!doc || !doc.events || !doc.events.length) return;
@@ -1175,7 +1438,9 @@ async function tickTraining(env, t, atWar) {
   }
 
   const over = ev => t > ev.to;
-  const active = doc.events.filter(ev => t >= ev.from && !ev.locked);   // a just-ended event still owes a final reading
+  // attack events are not this tick's business — tickAttackEvents owns them,
+  // and leaving them in here had the gym pass lock one before it was ever read
+  const active = doc.events.filter(ev => ev.kind !== "attack" && t >= ev.from && !ev.locked);   // a just-ended event still owes a final reading
   const schedule = () => {
     const every = atWar ? 900 : 180;
     let next = t + (active.length ? every : 3600);
@@ -1301,6 +1566,7 @@ async function tick(env) {
 
   await tickFriends(env, t, !!meta.active);
   await tickTraining(env, t, !!meta.active);
+  try { await tickAttackEvents(env, t) } catch (e) { /* the gym side matters more */ }
 
   let act = meta.active;
   if (act && act.start > t) return;
