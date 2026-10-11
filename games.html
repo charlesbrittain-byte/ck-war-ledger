@@ -526,16 +526,60 @@ function drawChart(ev, now){
   rows.forEach(r=>{
     const c=colourFor(r.id);
     const mine = me && r.id===me.id;
-    const pts=r.series.map(([t,v])=>[X(t),Y(v*k)]);
-    const tpts=r.series.map(([t,v])=>[t,X(t),Y(v*k)]);     // keep the clock, for locating a boost
+    /* Somebody who stopped training at tea time still exists at midnight. Carry
+       the last value along to the clock, or their line appears to stop dead in
+       the middle of the chart as though the tracker lost them. */
+    const ser = r.series.slice();
+    const tEnd = Math.min(ev.to, now || 0);
+    if(ser.length && ser[ser.length-1][0] < tEnd - 60) ser.push([tEnd, ser[ser.length-1][1]]);
+    const pts=ser.map(([t,v])=>[X(t),Y(v*k)]);
+    const tpts=ser.map(([t,v])=>[t,X(t),Y(v*k)]);          // keep the clock, for locating a boost
     const d=pts.map((pt,j)=>(j?"L":"M")+pt[0].toFixed(1)+" "+pt[1].toFixed(1)).join(" ");
     // your own line gets a wash underneath it, so you can find yourself at a glance
     if(mine) p+=`<path d="${d} L ${pts[pts.length-1][0].toFixed(1)} ${Y(0).toFixed(1)} L ${pts[0][0].toFixed(1)} ${Y(0).toFixed(1)} Z" fill="url(#meFill)" stroke="none"/>`;
-    // the glow is a soft wide pass under a crisp one, rather than a blur filter
-    // on the line itself, which goes muddy where seven of them cross
-    p+=`<path d="${d}" fill="none" stroke="${c}" stroke-width="${mine?11:8}" stroke-linejoin="round" stroke-linecap="round" opacity=".13"/>`
-     + `<path d="${d}" fill="none" stroke="${c}" stroke-width="${mine?5.5:4}" stroke-linejoin="round" stroke-linecap="round" opacity=".22"/>`
-     + `<path d="${d}" fill="none" stroke="${c}" stroke-width="${mine?3.2:2.4}" stroke-linejoin="round" stroke-linecap="round"/>`;
+
+    /* The line's own thickness carries how hard the hour went. No marker at all:
+       where somebody was training well above par the line swells, and where they
+       were idle or ordinary it runs thin. Taken hour by hour rather than
+       training by training, because single trainings are spiky and arbitrary —
+       splitting one dump across fourteen of them is the same hour's work as
+       doing it in four.
+
+       The widths are then smoothed across neighbouring segments, so a hot hour
+       eases in and out instead of starting and stopping with a step. */
+    const band = r.band || [];
+    const multAt = t => { for(const q of band) if(t >= q[0] && t < q[0]+3600) return q[1]; return 0 };
+    const base = mine ? 3.2 : 2.4;
+    const raw = [];
+    for(let j=0; j<tpts.length-1; j++){
+      const mid = (tpts[j][0] + tpts[j+1][0]) / 2;
+      raw.push(Math.max(0, multAt(mid) - 1));          // par is the resting thickness
+    }
+    const sm = raw.map((_,j)=>{                        // the taper, three segments wide
+      let tot=0, wt=0;
+      for(let o=-2; o<=2; o++){ const q=raw[j+o]; if(q==null) continue;
+        const f = 1/(1+Math.abs(o)); tot += q*f; wt += f; }
+      return wt ? tot/wt : 0;
+    });
+    const wid = sm.map(v => base + Math.min(4.5, v*1.9));
+
+    // one path per thickness band, not one per segment: seven members at 200
+    // segments each would be 1,400 nodes and a phone would feel it
+    const runs = [];
+    for(let j=0; j<wid.length; j++){
+      const lvl = Math.round(wid[j]*2)/2;
+      const prev = runs[runs.length-1];
+      if(prev && prev.lvl===lvl) prev.pts.push(pts[j+1]);
+      else runs.push({lvl, pts:[pts[j], pts[j+1]], hot: sm[j]});
+    }
+    for(const run of runs){
+      const rd = run.pts.map((pt,j)=>(j?"L":"M")+pt[0].toFixed(1)+" "+pt[1].toFixed(1)).join(" ");
+      const lift = Math.min(1, run.hot/2.6);
+      p+=`<path d="${rd}" fill="none" stroke="${c}" stroke-width="${(run.lvl*3.2).toFixed(1)}" opacity="${(.09+lift*.07).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`
+       + `<path d="${rd}" fill="none" stroke="${c}" stroke-width="${(run.lvl*1.8).toFixed(1)}" opacity="${(.18+lift*.12).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`
+       + `<path d="${rd}" fill="none" stroke="${heat(c, lift*0.6)}" stroke-width="${run.lvl.toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+
     const last=pts[pts.length-1];
     if(last){
       // a halo in the page colour so dots that overlap still read as separate
@@ -543,68 +587,25 @@ function drawChart(ev, now){
        + `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="${mine?4:3}" fill="${c}">`
        + `<title>${esc(r.name)} ${(sc(r)*k).toFixed(1)}% of the room, raw +${r.gain.toFixed(2)}%</title></circle>`;
     }
-    /* A bolt per training that beat par for their size. Several in a row land on
-       top of each other, so anything within 14px is drawn as one bolt that says
-       how many it stands for — a burst of fourteen should not look like one, nor
-       like an unreadable smear. */
-    const groups=[];
-    for(const m of (r.marks||[])){
-      const px=X(m[0]), e=m[3]||0;
-      const g=groups[groups.length-1];
-      // the multiple is what matters, so a group carries the energy-weighted one
-      // across everything in it, plus the energy that bought it
-      if(g && px-g.px < 14){ g.e+=e; g.wx+=m[2]*e; g.wh+=m[4]*e; g.last=m[0]; g.v=m[1] }
-      else groups.push({px, v0:m[1], v:m[1], e, wx:m[2]*e, wh:m[4]*e, first:m[0], last:m[0]});
-    }
-    for(const g of groups){
-      const mult = g.e>0 ? g.wx/g.e : 0;
-      const hap  = g.e>0 ? g.wh/g.e : 0;            // the part happy bought
-      const stat = hap>0 ? mult/hap : 1;            // the part training a big stat bought
-      const happyLed = hap >= 1.75;
-      // sit ON the line, not floating above the chart. A burst is a near-vertical
-      // climb, so the midpoint of what it covers puts the bolt on that segment.
-      const py=Y(((g.v0+g.v)/2)*k);
-      const when = g.last>g.first ? `${fmtClock(g.first)}\u2013${fmtClock(g.last)}` : fmtClock(g.first);
-      /* Only one of these two is measured directly. Stat choice is: Torn prices a
-         gain off the stat you train, so we can work out exactly what training a
-         bigger one is worth. Whatever is left over is everything else — happy
-         most likely, but an FHC or simply training while happy is high looks the
-         same from out here. So it is not labelled as a jump. */
-      const why = happyLed
+    /* Nothing is drawn for a boost any more — the thickness above is the whole
+       encoding. What is left is somewhere to tap: an invisible run over each
+       hour that went meaningfully above par, carrying what it was worth. */
+    for(const [hs, x, e, hap] of band){
+      if(x < 1.75) continue;
+      const inHour = tpts.filter(q => q[0] >= hs && q[0] < hs+3600);
+      if(!inHour.length) continue;
+      const si = tpts.indexOf(inHour[0]);
+      const seg = si > 0 ? [tpts[si-1], ...inHour] : inHour;
+      if(seg.length < 2) continue;
+      const stat = hap > 0 ? x/hap : 1;
+      const why = hap >= 1.75
         ? `\u00d7${hap.toFixed(2)} from happy or similar, \u00d7${stat.toFixed(2)} from training a bigger stat`
         : `\u00d7${stat.toFixed(2)} from training a bigger stat, \u00d7${hap.toFixed(2)} from happy or similar`;
-      const tip = `${esc(r.name)} \u2014 ${g.e.toLocaleString()} energy at \u00d7${mult.toFixed(2)} `
-                + `what the gym normally gives at their size. ${why}. ${when}`;
-      // the transparent disc is the tap target: a 14px glyph is far too small a
-      // thing to hit with a thumb
-      /* Nothing is drawn ON the line any more. Discs, bolts, triangles — they all
-         read as stickers however carefully they were placed, because they were
-         foreign objects sitting on somebody's data. So the LINE does the
-         talking: the stretch where the boost happened is over-drawn hotter,
-         brighter and heavier, with the glow turned up. A big boost burns more
-         of the line than a small one, which is the honest encoding — it really
-         did cover more ground. The whole lit stretch is the tap target. */
-      const seg = tpts.filter(q => q[0] >= g.first && q[0] <= g.last);
-      const si = tpts.indexOf(seg[0]);
-      if (si > 0) seg.unshift(tpts[si-1]);                 // start from where the climb began
-      if (seg.length > 1) {
-        const sd = seg.map((q,j2)=>(j2?"L":"M")+q[1].toFixed(1)+" "+q[2].toFixed(1)).join(" ");
-        const hot = heat(c, happyLed ? 0.8 : 0.5);         // happy burns whiter than stat choice
-        const w = (mine?3.2:2.4) + Math.min(4, mult*1.0);
-        // a bloom around the lit stretch, faked with falling-off rings rather
-        // than a blur filter — seven blurs in one svg crawls on a phone
-        const mx = seg.reduce((a,q)=>a+q[1],0)/seg.length, my = seg.reduce((a,q)=>a+q[2],0)/seg.length;
-        const R0 = Math.min(34, 13 + mult*4.5);
-        let bloom = "";
-        for (const [f,o] of [[1,.05],[.72,.07],[.5,.10],[.3,.14]])
-          bloom += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="${(R0*f).toFixed(1)}" fill="${c}" opacity="${o}"/>`;
-        p+=`<g class="bolt" data-tip="${tip.replace(/"/g,"&quot;")}" style="cursor:pointer">`
-         + bloom
-         + `<path d="${sd}" fill="none" stroke="${c}" stroke-width="${(w*5).toFixed(1)}" opacity=".22" stroke-linecap="round" stroke-linejoin="round"/>`
-         + `<path d="${sd}" fill="none" stroke="${c}" stroke-width="${(w*2.4).toFixed(1)}" opacity=".40" stroke-linecap="round" stroke-linejoin="round"/>`
-         + `<path d="${sd}" fill="none" stroke="${hot}" stroke-width="${w.toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`
-         + `<path d="${sd}" fill="none" stroke="transparent" stroke-width="24" pointer-events="stroke"/></g>`;
-      }
+      const tip = `${esc(r.name)} \u2014 ${fmtClock(hs)}, ${e.toLocaleString()} energy at \u00d7${x.toFixed(2)} `
+                + `what the gym normally gives at their size. ${why}.`;
+      const sd = seg.map((q,j)=>(j?"L":"M")+q[1].toFixed(1)+" "+q[2].toFixed(1)).join(" ");
+      p+=`<g class="bolt" data-tip="${tip.replace(/"/g,"&quot;")}" style="cursor:pointer">`
+       + `<path d="${sd}" fill="none" stroke="transparent" stroke-width="26" pointer-events="stroke"/></g>`;
     }
   });
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`);

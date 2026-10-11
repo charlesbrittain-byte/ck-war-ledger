@@ -155,7 +155,7 @@ export default {
             const was = { first: u.first, gymE: u.gymE || null };
             u.first = rb.first; u.fs = rb.fs; u.fsEst = false;
             u.gymE = rb.energy; u.fromLog = true; u.s = rb.series.slice();
-            u.jx = rb.jumps || [];
+            u.jx = rb.jumps || []; u.bd = rb.band || [];
             const xl = await xanaxFromLog(keys[id].key, ev.from, ev.to);
             if (xl != null) u.xanLog = xl;
             done.push({ ev: ev.id, name: u.name, sessions: sess.length, energy: rb.energy,
@@ -186,7 +186,7 @@ export default {
               const last = rb.series[rb.series.length - 1][1];
               ev.users[id] = { name: k.name, first: rb.first, firstAt: ev.from, fs: rb.fs, fsEst: false,
                                ls: end, last, gymE: rb.energy, fromLog: true, s: rb.series.slice(),
-                               jx: rb.jumps || [],
+                               jx: rb.jumps || [], bd: rb.band || [],
                                maxE: k.maxE || 150 };
               const xl = await xanaxFromLog(k.key, ev.from, ev.to);
               if (xl != null) ev.users[id].xanLog = xl;
@@ -238,7 +238,7 @@ export default {
                   if (rb) {
                     u.first = rb.first; u.fs = rb.fs; u.fsEst = false;
                     u.gymE = rb.energy; u.fromLog = true;
-                    u.s = rb.series.slice(); u.jx = rb.jumps || [];
+                    u.s = rb.series.slice(); u.jx = rb.jumps || []; u.bd = rb.band || [];
                     u.last = rb.series[rb.series.length - 1][1];
                   }
                 } else if (sess) {
@@ -368,6 +368,8 @@ export default {
           vsPar: (u.gymE > 0 && u.first > 0 && g > 0)
                  ? +((g / u.gymE) / parOf(SIZE_OF(u, ev.stat))).toFixed(2) : null,
           marks,
+          // [hourStart, multiple vs par, energy, the part stat choice cannot explain]
+          band: (u.bd || []).filter(b => b[0] + 3600 > ev.from && b[0] <= ev.to),
           since: u.firstAt, updated: u.lastAt,
           lateBy: u.fromLog ? 0 : Math.max(0, u.firstAt - ev.from),
           series: ser
@@ -946,6 +948,34 @@ async function gymSessions(key, since, upto){
 // Rebuild someone's event from their log: where they started, and every step
 // since. `nowStats` is their latest per-stat reading, used for stats they have
 // not trained in this window — those are unchanged, so now IS the start.
+/* An hour at a time, rather than a training at a time. Single trainings are
+   spiky and arbitrary — someone who splits a dump across fourteen of them did
+   the same hour's work as someone who did it in four. The page draws the line
+   thicker where the hour went harder, so this is what it needs: for each hour,
+   how much was gained, how much energy it cost, and what par was over it. */
+function hourly(){
+  const HOUR = 3600, m = new Map();
+  return {
+    add(t, inc, energy, par, parStat){
+      if (!(energy > 0)) return;
+      const h = Math.floor(t / HOUR) * HOUR;
+      const b = m.get(h) || { inc: 0, e: 0, pw: 0, sw: 0 };
+      b.inc += inc; b.e += energy;
+      b.pw += par * energy;                    // energy-weighted par over the hour
+      b.sw += parStat * energy;                // ... and par for the stat they chose
+      m.set(h, b);
+    },
+    out(){
+      return [...m.entries()].sort((a, b2) => a[0] - b2[0]).map(([h, b]) => {
+        const par = b.pw / b.e, pst = b.sw / b.e;
+        const x = par > 0 ? (b.inc / b.e) / par : 0;          // against par for their size
+        const hap = pst > 0 ? (b.inc / b.e) / pst : x;        // ... and the part stat choice cannot explain
+        return [h, +x.toFixed(2), b.e, +hap.toFixed(2)];
+      });
+    }
+  };
+}
+
 function fromSessions(sessions, nowStats, from, onlyStat){
   if (!nowStats) return null;
   if (onlyStat) {
@@ -955,18 +985,20 @@ function fromSessions(sessions, nowStats, from, onlyStat){
     let run = base;
     const series = [[from, +base.toFixed(2)]];
     const jumps = [];
+    const band = hourly();
     for (const g of ss) {
       // no stat-choice component to separate out here — everyone is on the same
       // stat, so whatever beats par is happy or similar, full stop
       const par = parOf(4 * g.before);
       const x = (g.energy > 0 && par > 0) ? (g.inc / g.energy) / par : 0;
+      band.add(g.t, g.inc, g.energy, par, par);
       run += g.inc;
       series.push([g.t, +run.toFixed(2)]);
       if (x >= JUMP_MARK) jumps.push([g.t, +run.toFixed(2), +x.toFixed(1), g.energy, +x.toFixed(2)]);
     }
     let t2 = series;
     while (t2.length > 220) t2 = t2.filter((_, i) => i % 2 === 0 || i >= t2.length - 60);
-    return { first: base, fs: null, series: t2, jumps,
+    return { first: base, fs: null, series: t2, jumps, band: band.out(),
              energy: ss.reduce((a, g) => a + g.energy, 0) };
   }
   const start = { s: nowStats.s, d: nowStats.d, p: nowStats.p, x: nowStats.x };
@@ -982,6 +1014,7 @@ function fromSessions(sessions, nowStats, from, onlyStat){
      the weekend. These carry their own value rather than a series index, so
      they survive the thinning below. */
   const jumps = [];
+  const band = hourly();                 // how hard each hour went, for the line's width
   for (const g of sessions) {
     const par = parOf(run);
     const x = (g.energy > 0 && par > 0) ? (g.inc / g.energy) / par : 0;
@@ -994,6 +1027,7 @@ function fromSessions(sessions, nowStats, from, onlyStat){
     const parStat = parOf(4 * g.before);
     const sFac = parStat > 0 && par > 0 ? parStat / par : 1;        // the stat-choice share
     const h = sFac > 0 ? x / sFac : x;                              // the happy share
+    band.add(g.t, g.inc, g.energy, par, parStat);
     run += g.inc;
     series.push([g.t, +run.toFixed(2)]);
     // energy too: how much was spent at that multiple says more than how many
@@ -1003,7 +1037,7 @@ function fromSessions(sessions, nowStats, from, onlyStat){
   // keep it to a sane size for the chart
   let s2 = series;
   while (s2.length > 220) s2 = s2.filter((_, i) => i % 2 === 0 || i >= s2.length - 60);
-  return { first, fs: start, series: s2, jumps,
+  return { first, fs: start, series: s2, jumps, band: band.out(),
            energy: sessions.reduce((a, g) => a + g.energy, 0) };
 }
 
@@ -1042,6 +1076,7 @@ function applyReading(u, t, r, maxE, st){
     u.fromLog = true;
     u.s = r.rebuilt.series.slice();
     u.jx = r.rebuilt.jumps || [];
+    u.bd = r.rebuilt.band || [];
   }
   if (r.cons) {
     // each counter gets its own guard. Sharing one meant that adding a counter
