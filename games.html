@@ -59,6 +59,18 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .bolt:hover text,.bolt:active text{animation:none; opacity:1}
 @keyframes boltPulse{0%,100%{opacity:.78} 50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.bolt text{animation:none}}
+.faq{margin:16px 0 0}
+.faq details{border-top:1px solid var(--line)}
+.faq details:last-of-type{border-bottom:1px solid var(--line)}
+.faq summary{cursor:pointer; padding:11px 2px; font-size:14px; font-weight:600; color:var(--text);
+  list-style:none; display:flex; align-items:center; gap:8px}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::marker{content:""}
+.faq summary::before{content:"+"; color:var(--amber); font-weight:700; width:11px; flex:none}
+.faq details[open] summary::before{content:"\2013"}
+.faq summary:hover{color:var(--amber)}
+.faq p{margin:0 0 9px 19px; font-size:13.5px; line-height:1.6; color:var(--dim)}
+.faq details[open] > p:last-child{margin-bottom:12px}
 #board tr{transition:background .12s}
 #board tr:hover{background:#1A1F26}
 .capped{display:inline-block; margin-left:6px; padding:1px 5px; border-radius:4px; font-size:11px;
@@ -242,42 +254,50 @@ summary.head::before{content:""; width:3px; height:15px; background:var(--amber)
     per-stat recording only began part way through, so your four stats as they are now have been wound back to the
     total you started on. Only the total matters to the score, so this is close for everyone. Events from here on
     record the real split from the first second.</p>
-  <p class="hint">Ranking is on <b>Share</b>, which is just <b>Adjusted %</b> rescaled, so the order is the same.
-    Raw % gain is a poor measure, because gym gains do not keep pace with your stats in a straight line. Through the
-    ordinary range the gain a given energy buys rises almost in step with your stats, so raw % is close to fair there
-    &mdash; but under about 300k total it flattens off, and past about 80 million it falls off a cliff and being big
-    turns into a straight penalty. Adjusted divides your gain by a curve with that shape, so the score comes out as a
-    measure of the energy you actually put in rather than of how big or small you happen to be.
-    <br><br>The curve is measured, not guessed: <b>15,467 real gym trainings</b> from the members who share their log,
-    spanning 10 stat to 2 billion. Every size band has four or five different people in it, which is what stops it
-    measuring "who is this" instead of "how big are they". It sits within 5% of what those logs actually show, right
-    across the range. It is a fixed calculation: your score does not depend on who else entered. Bigger players are
-    still given a slightly harder time, on purpose, but only slightly.
-    <br><br><b>Big sessions are scored up to a ceiling.</b> A weekend counts for at most <b>2.5&times;</b> what ordinary
-    training buys at your size. Anything above that still shows in full &mdash; your real gain, your real percentage and
-    your real multiplier are all on the board untouched &mdash; but the score stops there, marked <span class="capped">capped</span>.
-    Jumps are still well worth doing; one enormous one just cannot decide the whole event on its own.
-    <br><br><b>Marks on the graph.</b> A <b>&#9650;</b> is a burst explained by <b>training your strongest stat</b>
-    &mdash; Torn works a gain out from the single stat you train, not your total, so your best stat beats par on its
-    own with no happy at all. A <b>&#9889;</b> is a burst that stat choice <i>cannot</i> explain, which usually means
-    happy, though an FHC or just training while your happy is high looks the same from out here. Tap either for the
-    energy behind it and the split. Both are worth having; they are simply different tricks, and neither is cheating.
-    <br><br>A <b>&#9889; multiplier</b> beside a name means that person gained several times more than the energy
-    they got through can normally buy — which is what a happy jump looks like from the outside. It is shown for
-    interest and <b>does not change anyone's score</b>; jumps are allowed. Nothing appears for ordinary training.
-    <br><br><b>Xanax</b> is every xanax you took during the event, one pill per xanax. If you share your gym log it is
-    counted from there, which catches the lot — yours and the faction's. Otherwise it falls back to the faction
-    armoury log, which only sees what the faction handed out, so any you bought yourself will be missing.
-    <b>Worth knowing:</b> Torn works a gym gain out from the single stat you are training, not your total, so
-    <b>training your strongest stat buys you noticeably more for the same energy</b> &mdash; on the first weekend it was
-    worth about a third. The score is deliberately left on your total so that this stays a tactic worth thinking
-    about rather than something the scoring quietly cancels out. Pick your lane.
-    <br><br><b>vs par</b> is how much your gain beat what ordinary training buys at your size &mdash; &times;1.00 is a normal
-    session, above that means you got more out of the same energy. It needs your gym log, so it is blank without one,
-    and it is shown for interest: the score already accounts for it.
-    <br><br><b>Refills</b> and <b>Cans</b> come from your own stats too. <b>Gym E</b> is the energy you actually spent
-    training, read straight from your Torn log — it only appears if your key shares the log, and shows
-    &ldquo;&mdash;&rdquo; otherwise. None of them affect the score; they are there so you can see who put the effort in.</p>
+  <div class="faq">
+    <details><summary>How is this scored?</summary>
+      <p>Your gain, divided by a curve for your size, so it measures the energy you put in rather than how big you
+      are. Ranking is on <b>Share</b> &mdash; everyone&rsquo;s score added up makes 100% and the board splits it.</p></details>
+
+    <details><summary>Why not just raw % gain?</summary>
+      <p>Because gym gains do not keep pace with your stats in a straight line. Under about 300k total it flattens
+      off, and past about 80 million it falls off a cliff &mdash; being big turns into a straight penalty. Raw % is
+      close to fair in the middle and badly unfair at both ends.</p></details>
+
+    <details><summary>Is the curve guessed?</summary>
+      <p>No. It is measured from <b>15,467 real gym trainings</b> out of our own members&rsquo; logs, from 10 stat up
+      to 2 billion, and it sits within 5% of what those logs show right across that range. Every size band has four or
+      five different people in it, so it measures size rather than who happens to be that size.</p>
+      <p>Your score never depends on who else entered. Bigger players get a slightly harder time on purpose, but only
+      slightly.</p></details>
+
+    <details><summary>Why does my row say capped?</summary>
+      <p>A weekend counts for at most <b>2.25&times;</b> what ordinary training buys at your size. Your real gain,
+      percentage and multiplier all still show in full &mdash; only the score stops there. Jumps are well worth doing;
+      one enormous one just should not decide the whole event.</p></details>
+
+    <details><summary>Why does a line go thick and bright?</summary>
+      <p>That is the hour the person was training hardest. The line swells and lifts toward white in proportion to how
+      far above par they went, hour by hour. Tap a thick stretch for the energy behind it.</p></details>
+
+    <details><summary>Does training my biggest stat help?</summary>
+      <p>Yes, a lot. Torn works a gain out from the single stat you train, not your total, so your strongest stat buys
+      noticeably more for the same energy &mdash; about a third more on our first weekend. The score is deliberately
+      left on your total so this stays a tactic worth thinking about. Pick your lane.</p>
+      <p>Tapping a thick stretch splits it: how much came from stat choice, and how much from happy or similar.</p></details>
+
+    <details><summary>What is &ldquo;vs par&rdquo;?</summary>
+      <p>How much your gain beat what ordinary training buys at your size. &times;1.00 is a normal session. It needs
+      your gym log, and it is shown for interest &mdash; the score already accounts for it.</p></details>
+
+    <details><summary>What do the other columns mean?</summary>
+      <p><b>Xanax</b> is every one you took during the event. With a gym log it catches the lot, yours and the
+      faction&rsquo;s; without one it falls back to the faction armoury, so anything you bought yourself is missing.</p>
+      <p><b>Gym E</b> is the energy you actually spent training, straight from your log &mdash; &ldquo;&mdash;&rdquo;
+      without one. <b>Refills</b> and <b>Cans</b> come from your own stats. None of these affect the score; they are
+      there so you can see who put the work in.</p></details>
+  </div>
+
   <p class="hint" id="smallprint">There is nothing to press. Connect your key once — before the event if you like —
     and the tracker takes your starting point the moment it opens, reads you every few minutes through it, and takes a
     final reading at the end. Join late and only the rest of the event counts for you, which the board shows beside
