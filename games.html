@@ -111,6 +111,7 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
 .tile span{display:block; font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; margin-top:2px}
 /* the top three as a podium, the way a war page shows a result */
 .statonly{border:1px solid var(--amber); border-radius:8px; padding:8px 10px; margin:10px 0}
+.statonly.soon{border-color:var(--blood,#D6294B); background:#1A1014}
 .held{border:1px solid var(--warn,#b8860b); border-radius:8px; padding:8px 10px; margin:10px 0}
 .podium{display:flex; gap:9px; align-items:flex-end; margin:12px 0 4px}
 .pod{flex:1; text-align:center; border:1px solid var(--line); border-radius:7px; padding:9px 7px 10px;
@@ -809,13 +810,30 @@ function render(data){
     + (pz[n].id? `<img src="https://www.torn.com/images/items/${pz[n].id}/large.png" alt="" loading="lazy">` : "")
     + `<span><span class="pl">${label}</span><br><span class="pn">${esc(pz[n].name)}</span></span></div>`).join("");
   const STAT_NAME={s:"Strength",d:"Defence",p:"Speed",x:"Dexterity"};
+  const statList = st => st.split("").map(c=>STAT_NAME[c]).join(" and ");
+  /* A rotating event changes what counts as it runs, so this is the one thing on
+     the page people actually need in front of them. An hour before a change it
+     says what is coming, which is enough time to spend what you have on the
+     stat that is still live. */
+  if(ev.rot && ev.rot.on){
+    const r=ev.rot, mins=Math.max(0, Math.round(r.changesIn/60));
+    const left = mins>=60 ? Math.floor(mins/60)+"h "+String(mins%60).padStart(2,"0")+"m" : mins+" min";
+    $("statOnly").hidden=false;
+    $("statOnly").className="hint statonly" + (r.warning? " soon":"");
+    $("statOnly").innerHTML = `<b>Counting now: ${statList(r.stats)}.</b> `
+      + `Only ${statList(r.stats).toLowerCase()} gains count, and only the energy you spend on them. `
+      + `<b>Changes in ${left}.</b>`
+      + (r.warning && r.next ? ` Next up: <b>${statList(r.next)}</b> &mdash; spend what you have before it turns over.`
+         : ` What comes next is shown an hour before it changes.`);
+  } else {
   $("statOnly").hidden = !ev.stat;
   $("statOnly").innerHTML = ev.stat
-    ? `<b>${STAT_NAME[ev.stat]} only.</b> Only ${STAT_NAME[ev.stat].toLowerCase()} gains count this time, and only the `
-      + `energy you spend on ${STAT_NAME[ev.stat].toLowerCase()} &mdash; train anything else and it simply does not `
+    ? `<b>${statList(ev.stat)} only.</b> Only ${statList(ev.stat).toLowerCase()} gains count this time, and only the `
+      + `energy you spend on them &mdash; train anything else and it simply does not `
       + `register either way. Everyone is on the same stat, so picking your strongest is not a lever here: it is `
       + `purely energy in and how well you spend it.`
     : "";
+  }
   $("updated").textContent = "updated " + fmtClock(now||Math.floor(Date.now()/1000));
 
   const scored = rows.filter(r=>r.adj>0);

@@ -482,14 +482,18 @@ details.settings summary{cursor:pointer}
   <div class="zoomrow">
     <span class="lbl">Name</span>
     <input id="evName" placeholder="Training weekend" style="min-width:150px" maxlength="80">
-    <span class="lbl">Counts</span>
-    <select id="evStat" title="Score the whole battle-stat total, or run it on one stat only — a speed weekend, a defence weekend. Can only be set before anyone is recorded.">
-      <option value="">all four stats</option>
-      <option value="s">strength only</option>
-      <option value="d">defence only</option>
-      <option value="p">speed only</option>
-      <option value="x">dexterity only</option>
-    </select>
+    <span class="lbl" title="Which stats count. Tick none or all four for the whole battle-stat total; tick one or two to run a speed weekend, a defence weekend, or any pair. Locked once anyone is recorded.">Counts</span>
+    <span id="evStatBox" class="statpick">
+      <label><input type="checkbox" id="evStatS" value="s">Str</label>
+      <label><input type="checkbox" id="evStatD" value="d">Def</label>
+      <label><input type="checkbox" id="evStatP" value="p">Spd</label>
+      <label><input type="checkbox" id="evStatX" value="x">Dex</label>
+      <span class="meta" id="evStatNote">all four</span>
+      <label title="Change which stats count at random intervals through the event. Members get an hour's warning before each change, and are told what is coming next.">
+        <input type="checkbox" id="evRot">Rotate</label>
+      <span id="evRotOpts" hidden class="meta">every
+        <input type="number" id="evRotMin" value="3" min="1" max="24" style="width:46px">&ndash;<input type="number" id="evRotMax" value="8" min="1" max="48" style="width:46px">h</span>
+    </span>
     <span class="lbl">From</span>
     <input type="datetime-local" id="evFrom">
     <span class="lbl">to</span>
@@ -2854,7 +2858,26 @@ const prizeId=name=>{ const f=PRIZE_ITEMS.find(i=>i.n.toLowerCase()===(name||"")
 const prizeParams=()=>{ const o={prizes:1};
   for(const n of [1,2,3]){ const v=($("evP"+n).value||"").trim(); if(v) o["p"+n]=prizeId(v)+":"+v }
   return o };
-const statParam=()=>({ stat: $("evStat").value || "" });
+const STAT_BOXES=[["s","evStatS"],["d","evStatD"],["p","evStatP"],["x","evStatX"]];
+const statPicked=()=>STAT_BOXES.filter(([,id])=>$(id).checked).map(([k])=>k).join("");
+const statParam=()=>{
+  if(!$("evRot").checked) return { stat: statPicked() };
+  // a rotation draws its own stats, so a fixed pick would only confuse
+  return { rot:"mixed", rotmin:$("evRotMin").value||3, rotmax:$("evRotMax").value||8 };
+};
+$("evRot").addEventListener("change", ()=>{
+  $("evRotOpts").hidden = !$("evRot").checked;
+  for(const [,id] of STAT_BOXES) $(id).disabled = $("evRot").checked;
+  statNote();
+});
+function statNote(){
+  const n=statPicked(), names={s:"strength",d:"defence",p:"speed",x:"dexterity"};
+  $("evStatNote").textContent = $("evRot").checked ? "drawn at random as it runs"
+    : (!n || n.length===4) ? "all four"
+    : n.split("").map(k=>names[k]).join(" + ") + " only";
+}
+for(const [,id] of STAT_BOXES) $(id).addEventListener("change", statNote);
+statNote();
 /* The roll of everyone who has handed over a key. Deliberately independent of
    the event card: it should be there whether or not an event exists, and it was
    not, because it was being drawn from inside renderEvent. */
@@ -2931,10 +2954,17 @@ function renderEvent(j){
   const state = now<ev.from? "opens "+fmtDT(ev.from) : now>ev.to? "finished "+fmtDT(ev.to) : "running until "+fmtDT(ev.to);
   $("evMeta").textContent=(ev.name? ev.name+" · ":"")+state;
   $("evName").value=ev.name||"";
-  $("evStat").value=ev.stat||"";
-  // once anybody is on the board the stat is locked: changing it would rewrite
-  // what every baseline means
-  $("evStat").disabled = !!(ev.board && ev.board.length);
+  $("evRot").checked = !!ev.rot;
+  $("evRotOpts").hidden = !ev.rot;
+  if(ev.rot){ $("evRotMin").value=ev.rot.minH; $("evRotMax").value=ev.rot.maxH }
+  const picked=(ev.stat||"");
+  for(const [k,id] of STAT_BOXES){
+    $(id).checked = picked.includes(k);
+    // once anybody is on the board the stats are locked: changing them would
+    // rewrite what every baseline means
+    $(id).disabled = !!(ev.board && ev.board.length) || !!ev.rot;
+  }
+  statNote();
   const pz=ev.prizes||{};
   for(const n of [1,2,3]) $("evP"+n).value = pz[n]? pz[n].name : "";
   $("evPzNote").textContent = Object.keys(pz).length? "" : "optional — members only see the places you fill in";
