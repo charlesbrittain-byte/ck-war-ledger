@@ -58,13 +58,18 @@ export default {
                      from, to, users: {}, locked: false, archived: false, keyTest: null,
                      prizes: readPrizes(url), roster: {},
                      stat: readStats(url.searchParams.get("stat")),
-                     rot: null,
+                     rot: null, base: readBasis(url.searchParams.get("base")),
                      kind: url.searchParams.get("kind") === "attack" ? "attack" : "gym" };
         if (url.searchParams.has("rot")) {
           const minH = Math.max(1, +url.searchParams.get("rotmin") || 3);
           const maxH = Math.max(minH, +url.searchParams.get("rotmax") || 8);
           ev.rot = { minH, maxH, pick: url.searchParams.get("rot") || "mixed", warn: 3600 };
           ev.rot.segs = rotSchedule(ev, minH, maxH, ev.rot.pick);
+          // when the basis is mixed, each segment gets its own
+          if (ev.base === "mix") {
+            let n = 0;
+            for (const sg of ev.rot.segs) { sg.basis = (n++ % 3 === 2) ? "stat" : (n % 2 ? "total" : "stat") }
+          }
           ev.stat = null;                     // the schedule decides, not a fixed pick
         }
         doc.events.push(ev);
@@ -240,6 +245,7 @@ export default {
               const upto = Math.min(ev.to, now);
               const v0 = VAL_OF(r, ev.stat);
               const u = { name: k.name, first: v0, firstAt: now, fs: r.stats || null,
+                          allfs: r.stats || null,          // the whole split, for the "total" basis
                           ls: r.stats || null, last: v0, s: [[now, v0]],
                           maxE: k.maxE || 150 };
               if (k.log) {
@@ -380,14 +386,15 @@ export default {
 
       const boardFor = ev => Object.entries(ev.users || {}).map(([uid, u]) => {
         const g = (u.last || 0) - (u.first || 0);
-        const { d: den, tilt } = denomOf(u, ev.stat);
+        const { d: den, tilt } = denomOf(u, ev.stat, basisAt(ev, now));
         /* The line has to end where the score ends. The score is capped and the
            line was not, so a capped member's line ran clean off the top of the
            chart — past 100% of a board that only adds up to 100. Scale the whole
            line by however much the cap took off, which keeps its shape and lands
            the last point exactly on the score. */
         const capK = (() => {
-          const full = scoreOf(u, g, 0, ev.stat), cut = scoreOf(u, g, energyOf(doc, ev, uid, u, now), ev.stat);
+          const bs = basisAt(ev, now);
+          const full = scoreOf(u, g, 0, ev.stat, bs), cut = scoreOf(u, g, energyOf(doc, ev, uid, u, now), ev.stat, bs);
           return full > 0 ? cut / full : 1;
         })();
         // the chart follows the ranking, so it plots the adjusted score
@@ -401,7 +408,7 @@ export default {
         if (ser.length && u.firstAt && ser[0][0] > u.firstAt) ser.unshift([u.firstAt, 0]);
         const spent = energyOf(doc, ev, uid, u, now);
         const rotting = !!ev.rot;
-        const adj = rotting ? rotScoreOf(u, null) : scoreOf(u, g, spent, ev.stat);
+        const adj = rotting ? rotScoreOf(u, null) : scoreOf(u, g, spent, ev.stat, basisAt(ev, now));
         return {
           id: +uid, name: u.name,
           gain: rotting ? +((u.rotGain || 0)).toFixed(0)                 // stat points, not a percentage
@@ -410,7 +417,7 @@ export default {
           // whether the cap actually bit, so the page can say so rather than
           // leaving someone to wonder why a big number scored less than it looks
           capped: rotting ? !!u.rotCap
-                 : ((u.first > 0 && g > 0 && spent > 0 && g > CAPX * parOf(SIZE_OF(u, ev.stat)) * spent) || false),
+                 : ((u.first > 0 && g > 0 && spent > 0 && g > CAPX * parOf(SIZE_OF(u, ev.stat, basisAt(ev, now))) * spent) || false),
           xan: xanTaken(doc, ev, uid, u, now), xanFromLog: u.xanLog != null,
           refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
           cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)),
@@ -421,7 +428,7 @@ export default {
           vsPar: rotting
                  ? (u.gymE > 0 && u.effE > 0 ? +(u.effE / u.gymE).toFixed(2) : null)
                  : ((u.gymE > 0 && u.first > 0 && g > 0)
-                    ? +((g / u.gymE) / parOf(SIZE_OF(u, ev.stat))).toFixed(2) : null),
+                    ? +((g / u.gymE) / parOf(SIZE_OF(u, ev.stat, basisAt(ev, now)))).toFixed(2) : null),
           marks,
           // [hourStart, multiple vs par, energy, the part stat choice cannot explain]
           band: (u.bd || []).filter(b => b[0] + 3600 > ev.from && b[0] <= ev.to),
@@ -450,9 +457,10 @@ export default {
                       youIn: ev.roster ? (id ? ev.roster[id] != null : false) : true,
                       open: now >= ev.from && now <= ev.to, locked: !!ev.locked,
                       held: ev.held || null, stat: ev.stat || null, kind: ev.kind || "gym",
+                      base: ev.base || "total",
                       rot: ev.rot ? (() => { const at = statsAt(ev, now);
                         const soon = at.until != null && (at.until - now) <= (ev.rot.warn || 3600);
-                        return { on: true, stats: at.stats, until: at.until,
+                        return { on: true, stats: at.stats, until: at.until, basis: basisAt(ev, now),
                                  changesIn: at.until != null ? Math.max(0, at.until - now) : null,
                                  warning: soon, next: soon ? at.next : null,
                                  minH: ev.rot.minH, maxH: ev.rot.maxH, segments: ev.rot.segs.length } })() : null,
@@ -718,7 +726,7 @@ function finalBoard(doc, ev){
     const g = (u.last || 0) - (u.first || 0);
     return { id: +uid, name: u.name || "",
       gain: u.first > 0 ? +(100 * g / u.first).toFixed(3) : 0,       // raw, kept for the detail view
-      adj: scoreOf(u, g, energyOf(doc, ev, uid, u, now), ev.stat), exact: !!u.fs,
+      adj: scoreOf(u, g, energyOf(doc, ev, uid, u, now), ev.stat, basisAt(ev, now)), exact: !!u.fs,
       xan: xanTaken(doc, ev, uid, u, now),
       refills: Math.max(0, (u.ref || 0) - (u.firstR || 0)),
       cans: Math.max(0, (u.drk || 0) - (u.firstD || 0)) };
@@ -916,6 +924,22 @@ const readStats = v => {
 };
 const STAT_LIST = st => (st ? st.split("") : ["s","d","p","x"]);
 
+/* Which size the curve prices you against, and it changes what the competition
+   rewards:
+     "total" — your whole battle-stat total. Training your strongest stat then
+               pays, because the denominator does not follow what you picked.
+     "stat"  — the stat being trained, counted four times. That cancels stat
+               choice out: pick your best and the bar rises with it.
+     "mix"   — drawn per segment, so neither is the whole game. */
+const readBasis = v => (v === "stat" || v === "mix") ? v : "total";
+function basisAt(ev, t){
+  const b = ev.base || "total";
+  if (b !== "mix") return b;
+  if (!ev.rot || !ev.rot.segs) return "total";
+  for (const sg of ev.rot.segs) if (t >= sg.from && t < sg.to) return sg.basis || "total";
+  return "total";
+}
+
 /* Rotation. The whole schedule is drawn when the event opens and stored, rather
    than rolled live: everyone then sees the same thing, the countdown can be
    trusted, and anyone can check afterwards that it was not nudged. Segment
@@ -935,12 +959,15 @@ function rotSchedule(ev, minH, maxH, pick){
     if (ev.to - to < minH * 1800) to = ev.to;          // no stub at the end
     let stats;
     for (let tries = 0; tries < 12; tries++) {
-      const n = pick === "two" ? 2 : pick === "one" ? 1 : (rnd() < 0.65 ? 1 : 2);
+      // mixed draws mostly one stat, sometimes two, and now and then the lot
+      const r0 = rnd();
+      const n = pick === "two" ? 2 : pick === "one" ? 1
+              : (r0 < 0.55 ? 1 : r0 < 0.85 ? 2 : 4);
       const shuffled = all.slice();
       for (let i = shuffled.length - 1; i > 0; i--) {
         const j = Math.floor(rnd() * (i + 1)); [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
       }
-      stats = shuffled.slice(0, n).sort().join("");
+      stats = n === 4 ? "" : shuffled.slice(0, n).sort().join("");   // "" means every stat counts
       if (stats !== last) break;                        // never the same twice running
     }
     last = stats;
@@ -971,13 +998,20 @@ const VAL_OF = (r, st) => {
    balanced player built entirely of this get"; with two or three it is the
    average of those, counted four times, which reduces to the plain total when
    all four count. */
-const SIZE_OF = (u, st) => {
-  if (!st) return u.fs ? (u.fs.s||0)+(u.fs.d||0)+(u.fs.p||0)+(u.fs.x||0) : (u.first || 0);
-  return 4 * (u.first || 0) / STAT_LIST(st).length;
+const TOTAL_OF = u => {
+  if (u.allfs) { const f = u.allfs; return (f.s||0)+(f.d||0)+(f.p||0)+(f.x||0) }
+  if (u.fs)    { const f = u.fs;    return (f.s||0)+(f.d||0)+(f.p||0)+(f.x||0) }
+  if (u.ls)    { const f = u.ls;    return (f.s||0)+(f.d||0)+(f.p||0)+(f.x||0) }
+  return u.first || 0;
+};
+const SIZE_OF = (u, st, basis) => {
+  if (basis === "stat" && st) return 4 * (u.first || 0) / STAT_LIST(st).length;
+  if (!st) return TOTAL_OF(u);
+  return basis === "total" ? TOTAL_OF(u) : 4 * (u.first || 0) / STAT_LIST(st).length;
 };
 
-function denomOf(u, st){
-  const t = SIZE_OF(u, st);
+function denomOf(u, st, basis){
+  const t = SIZE_OF(u, st, basis);
   return { d: denomNeutral(t), tilt: Math.pow(REF / (t + FLOOR), TILT) };
 }
 
@@ -1023,7 +1057,7 @@ function jumpOf(doc, ev, uid, u, now){
   if (!(u.first > 0)) return null;
   const gain = (u.last || 0) - (u.first || 0);
   if (gain <= 0) return null;
-  const perEnergy = JUMP_PAR(SIZE_OF(u, ev.stat));   // stat points per energy at their size
+  const perEnergy = JUMP_PAR(SIZE_OF(u, ev.stat, basisAt(ev, now)));   // per energy at their size
   if (perEnergy <= 0) return null;
   const implied = gain / perEnergy;
   const available = energyOf(doc, ev, uid, u, now);
@@ -1048,12 +1082,12 @@ function rotScoreOf(u, st){
   return +(100 * (PAR_AT / denomNeutral(PAR_T)) * u.effE * tilt).toFixed(3);
 }
 
-function scoreOf(u, gain, energy, st){
-  const { d, tilt } = denomOf(u, st);
+function scoreOf(u, gain, energy, st, basis){
+  const { d, tilt } = denomOf(u, st, basis);
   if (!(d > 0)) return 0;
   let g = gain;
   if (energy > 0) {
-    const ceiling = CAPX * parOf(SIZE_OF(u, st)) * energy;
+    const ceiling = CAPX * parOf(SIZE_OF(u, st, basis)) * energy;
     if (ceiling > 0 && g > ceiling) g = ceiling;
   }
   return +(100 * g / d * tilt).toFixed(3);
@@ -1216,15 +1250,19 @@ function hourly(){
 function fromRotation(sessions, nowStats, ev){
   if (!nowStats || !ev.rot || !ev.rot.segs) return null;
   const segs = ev.rot.segs;
-  const counting = t => { for (const sg of segs) if (t >= sg.from && t < sg.to) return sg.stats; return null };
+  const seg = t => { for (const sg of segs) if (t >= sg.from && t < sg.to) return sg; return null };
+  const whole = (nowStats.s||0)+(nowStats.d||0)+(nowStats.p||0)+(nowStats.x||0);
   let effE = 0, gain = 0, energy = 0, capped = false;
   const series = [[ev.from, 0]];
   const jumps = [], band = hourly();
   let run = 0;
   for (const g of sessions) {
-    const live = counting(g.t);
-    if (!live || !STAT_LIST(live).includes(STAT_KEY[g.stat])) continue;   // wrong stat, does not count
-    const par = parOf(4 * g.before);
+    const sg = seg(g.t);
+    if (!sg) continue;
+    // "" means every stat counts in this segment
+    if (sg.stats && !STAT_LIST(sg.stats).includes(STAT_KEY[g.stat])) continue;
+    const basis = ev.base === "mix" ? (sg.basis || "total") : (ev.base || "total");
+    const par = basis === "stat" ? parOf(4 * g.before) : parOf(whole);
     if (!(par > 0) || !(g.energy > 0)) continue;
     const raw = g.inc / par;                       // energy's worth of ordinary training
     const cut = Math.min(raw, CAPX * g.energy);    // the ceiling, applied per training
@@ -1653,7 +1691,8 @@ async function tickTraining(env, t, atWar) {
       if (u && u.fromLog && keys[id] && !keys[id].log) u.logLost = true;
       else if (u && keys[id] && keys[id].log) delete u.logLost;
       if (!u) u = ev.users[id] = { name: keys[id].name, first: VAL_OF(r, ev.stat), firstAt: t, s: [],
-                                   fs: r.stats || null };          // the baseline split, captured once
+                                   fs: r.stats || null,
+                                   allfs: r.stats || null };       // the baseline split, captured once
       else if (keys[id].name) u.name = keys[id].name;
       applyReading(u, t, r, keys[id].maxE, ev.stat);
     }

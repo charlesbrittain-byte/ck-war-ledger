@@ -820,11 +820,17 @@ function render(data){
     const left = mins>=60 ? Math.floor(mins/60)+"h "+String(mins%60).padStart(2,"0")+"m" : mins+" min";
     $("statOnly").hidden=false;
     $("statOnly").className="hint statonly" + (r.warning? " soon":"");
-    $("statOnly").innerHTML = `<b>Counting now: ${statList(r.stats)}.</b> `
-      + `Only ${statList(r.stats).toLowerCase()} gains count, and only the energy you spend on them. `
+    const nowList = r.stats ? statList(r.stats) : "every stat";
+    $("statOnly").innerHTML = `<b>Counting now: ${nowList}.</b> `
+      + (r.stats ? `Only ${nowList.toLowerCase()} gains count, and only the energy you spend on them. `
+                 : `Everything counts this stretch. `)
       + `<b>Changes in ${left}.</b>`
-      + (r.warning && r.next ? ` Next up: <b>${statList(r.next)}</b> &mdash; spend what you have before it turns over.`
-         : ` What comes next is shown an hour before it changes.`);
+      + (r.warning && r.next != null
+         ? ` Next up: <b>${r.next ? statList(r.next) : "every stat"}</b> &mdash; spend what you have before it turns over.`
+         : ` What comes next is shown an hour before it changes.`)
+      + `<br><span class="meta">Measured against ${r.basis === "stat"
+          ? "<b>the stat being trained</b> &mdash; picking your strongest one does not help here, the bar rises with it"
+          : "<b>your whole battle-stat total</b> &mdash; so training your strongest stat pays"}.</span>`;
   } else {
   $("statOnly").hidden = !ev.stat;
   $("statOnly").innerHTML = ev.stat

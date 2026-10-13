@@ -494,6 +494,12 @@ details.settings summary{cursor:pointer}
       <span id="evRotOpts" hidden class="meta">every
         <input type="number" id="evRotMin" value="3" min="1" max="24" style="width:46px">&ndash;<input type="number" id="evRotMax" value="8" min="1" max="48" style="width:46px">h</span>
     </span>
+    <span class="lbl" title="What your gain is measured against. Your whole total means training your strongest stat pays off. The stat being trained means it does not — pick your best and the bar rises with it. Mixed draws one or the other as it runs.">Measured vs</span>
+    <select id="evBase">
+      <option value="total">your whole total</option>
+      <option value="stat">the stat being trained</option>
+      <option value="mix">mixed, drawn as it runs</option>
+    </select>
     <span class="lbl">From</span>
     <input type="datetime-local" id="evFrom">
     <span class="lbl">to</span>
@@ -2861,9 +2867,10 @@ const prizeParams=()=>{ const o={prizes:1};
 const STAT_BOXES=[["s","evStatS"],["d","evStatD"],["p","evStatP"],["x","evStatX"]];
 const statPicked=()=>STAT_BOXES.filter(([,id])=>$(id).checked).map(([k])=>k).join("");
 const statParam=()=>{
-  if(!$("evRot").checked) return { stat: statPicked() };
+  const base=$("evBase").value;
+  if(!$("evRot").checked) return { stat: statPicked(), base };
   // a rotation draws its own stats, so a fixed pick would only confuse
-  return { rot:"mixed", rotmin:$("evRotMin").value||3, rotmax:$("evRotMax").value||8 };
+  return { rot:"mixed", rotmin:$("evRotMin").value||3, rotmax:$("evRotMax").value||8, base };
 };
 $("evRot").addEventListener("change", ()=>{
   $("evRotOpts").hidden = !$("evRot").checked;
@@ -2954,6 +2961,8 @@ function renderEvent(j){
   const state = now<ev.from? "opens "+fmtDT(ev.from) : now>ev.to? "finished "+fmtDT(ev.to) : "running until "+fmtDT(ev.to);
   $("evMeta").textContent=(ev.name? ev.name+" · ":"")+state;
   $("evName").value=ev.name||"";
+  $("evBase").value = ev.base || "total";
+  $("evBase").disabled = !!(ev.board && ev.board.length);
   $("evRot").checked = !!ev.rot;
   $("evRotOpts").hidden = !ev.rot;
   if(ev.rot){ $("evRotMin").value=ev.rot.minH; $("evRotMax").value=ev.rot.maxH }
